@@ -1,6 +1,7 @@
 #! /usr/bin/python3
 import pandas as pd
 import sys
+import time
 
 # ---- Paramètres de la batterie ----
 battery_capacity_kwh = [10, 10, 10]  # Capacité de la batterie par phase (kWh)
@@ -215,8 +216,6 @@ print(f"+ Merged - Timestamp: {merged_start_timestamp} to {merged_end_timestamp}
 print("Export des données fusionnées vers merged_data.csv")
 merged_data.to_csv("merged_data.csv", index=False)
 
-exit(0)
-
 print("Début de la simulation...")
 # ---- Exécution sur les données des fichiers CSV ----
 results = []
@@ -226,7 +225,15 @@ for i in range(len(merged_data)):
     hour = timestamp.hour
     print(f"DEBUG: timestamp={timestamp}, day={day}, hour={hour}")
 
-    production = [merged_data.iloc[i]["solar_production"] / 3] * 3
+    production = [int(merged_data.iloc[i]["solar_production"] / 3)] * 3
+    print(f"DEBUG: production={production}")
+
+    consumption_phase_a = int(merged_data.iloc[i][f"phase_a"])
+    consumption_phase_b = int(merged_data.iloc[i][f"phase_b"])
+    consumption_phase_c = int(merged_data.iloc[i][f"phase_c"])
+    print(f"DEBUG: consumption_phase_a={consumption_phase_a}, consumption_phase_b={consumption_phase_b}, consumption_phase_c={consumption_phase_c}")
+    # Sleep 0.5 seconds to simulate processing time
+    time.sleep(0.01)
 
     #consumption = [merged_data.iloc[i][f"phase{j+1}"] for j in range(3)]
 
