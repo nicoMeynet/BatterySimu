@@ -4,12 +4,13 @@ import sys
 import time
 
 # ---- Paramètres de la batterie ----
-battery_capacity_kwh = [10, 10, 10]  # Capacité de la batterie par phase (kWh)
-max_charge_power_kw = [3, 3, 3]      # Puissance max de charge par phase (kW)
-max_discharge_power_kw = [3, 3, 3]   # Puissance max de décharge par phase (kW)
-efficiency = 0.9                     # Rendement (90%)
-soc_min = 20                         # Capacité de décharge minimale (%) (State of Charge)
-battery_cycles = 5000                # Durée de vie de la batterie en cycles
+battery_capacity_Wh = [10000, 10000, 10000]  # Capacité de la batterie par phase (Wh)
+max_charge_power_watts = [3000, 3000, 3000]      # Puissance max de charge par phase (W)
+max_discharge_power_watts = [3000, 3000, 3000]   # Puissance max de décharge par phase (W)
+battery_charge_efficiency = 0.9                     # Rendement (90%)
+battery_discharge_efficiency = 0.9                     # Rendement (90%)
+#soc_min = 20                         # Capacité de décharge minimale (%) (State of Charge)
+#battery_cycles = 5000                # Durée de vie de la batterie en cycles
 
 # ---- Configuration des tarifs d'électricité ----
 tarif_config = {
@@ -25,7 +26,10 @@ tarif_config = {
 
 # ---- État initial de la batterie ----
 battery_soc = [100, 100, 100]  # État de charge initial en %
-energy_in_battery = [battery_capacity_kwh[i] * (battery_soc[i] / 100) for i in range(3)]
+energy_in_battery_Wh = [battery_capacity_Wh[i] * (battery_soc[i] / 100) for i in range(3)]
+print(f"Initial battery energy phase 1: {energy_in_battery_Wh[0]} kWh")
+print(f"Initial battery energy phase 2: {energy_in_battery_Wh[1]} kWh")
+print(f"Initial battery energy phase 3: {energy_in_battery_Wh[2]} kWh")
 
 # ---- Fonction pour déterminer le tarif actuel ----
 def get_current_tarif(hour, day):
@@ -33,60 +37,73 @@ def get_current_tarif(hour, day):
         return tarif_config["pleines"]["tarif"]
     return tarif_config["creuses"]["tarif"]
 
+# ---- Fonction pour calculer l'énergie en Wh ----
+def calculate_energy_Wh(power_watts,duration_minutes):
+    return power_watts * duration_minutes/60
+
 # ---- Simulation ----
-def simulate_battery_behavior(prod_phase, cons_phase, hour, day):
-    global energy_in_battery, battery_soc
+def simulate_battery_behavior(house_grid_power_watts, hour, day):
+    global energy_in_battery_Wh
+    # Calcul du tarif actuel
     tarif = get_current_tarif(hour, day)
 
+    # Calcul de la production et de la consommation par phase
+    new_house_grid_power_watts = [0, 0, 0]
+    status = [0, 0, 0]
+    battery_cycle = [0, 0, 0]
     for phase in range(3):
-        surplus = prod_phase[phase] - cons_phase[phase]
-
-        if surplus > 0:
-            # Charger la batterie avec le surplus
-            charge_power = min(surplus, max_charge_power_kw[phase])
-            energy_in_battery[phase] += charge_power * efficiency * (1 / 3600)
+        if house_grid_power_watts[phase] < 0:
+            # On inject sur le reseau, charger la batterie avec le surplus
+            surplus_watts = abs(house_grid_power_watts[phase])
+            if energy_in_battery_Wh[phase] < battery_capacity_Wh[phase]:
+                # Charger la batterie si pas pleine
+                charge_power_watts = min(surplus_watts, max_charge_power_watts[phase])
+                energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts,1) * battery_charge_efficiency
+                energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts
+                battery_cycle[phase] = abs(energy_to_be_injected_in_battery_Wh / battery_capacity_Wh[phase] /2)
+                status[phase] = "charging"
+            else:
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
+                status[phase] = "full"
         else:
-            # Décharger la batterie si déficit
-            deficit = abs(surplus)
-            discharge_power = min(deficit, max_discharge_power_kw[phase])
-            if energy_in_battery[phase] > (battery_capacity_kwh[phase] * (soc_min / 100)):
-                energy_in_battery[phase] -= discharge_power * (1 / efficiency) * (1 / 3600)
-
-        # Calcul de l'état de charge (SoC)
-        battery_soc[phase] = (energy_in_battery[phase] / battery_capacity_kwh[phase]) * 100
-        battery_soc[phase] = max(soc_min, min(100, battery_soc[phase]))
+            # On consomme sur le réseau, décharger la batterie pour compenser
+            deficit_watts = house_grid_power_watts[phase]
+            discharge_power_watts = min(deficit_watts, max_discharge_power_watts[phase])
+            if energy_in_battery_Wh[phase] > 0:
+                # Décharger la batterie si pas vide
+                energy_to_be_consummed_from_battery_Wh = calculate_energy_Wh(discharge_power_watts,1) * (1 / battery_discharge_efficiency)
+                energy_in_battery_Wh[phase] -= energy_to_be_consummed_from_battery_Wh
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts 
+                battery_cycle[phase] = abs(energy_to_be_consummed_from_battery_Wh / battery_capacity_Wh[phase] /2)
+                status[phase] = "discharging"
+            else:
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
+                status[phase] = "empty"
 
     return {
         "phase1": {
-            "SOC": battery_soc[0],
-            "Energy_in_battery_kWh": energy_in_battery[0]
+            "New_House_Grid_power_watts": new_house_grid_power_watts[0],
+            "Energy_in_battery_Wh": energy_in_battery_Wh[0],
+            "Status": status[0],
+            "Battery_cycle": battery_cycle[0]
+
         },
         "phase2": {
-            "SOC": battery_soc[1],
-            "Energy_in_battery_kWh": energy_in_battery[1]
+            "New_House_Grid_power_watts": new_house_grid_power_watts[1],
+            "Energy_in_battery_Wh": energy_in_battery_Wh[1],
+            "Status": status[1],
+            "Battery_cycle": battery_cycle[1]
         },
         "phase3": {
-            "SOC": battery_soc[2],
-            "Energy_in_battery_kWh": energy_in_battery[2]
+            "New_House_Grid_power_watts": new_house_grid_power_watts[2],
+            "Energy_in_battery_Wh": energy_in_battery_Wh[2],
+            "Status": status[2],
+            "Battery_cycle": battery_cycle[2]
         },
         "Tarif": tarif
     }
 
-def validate_timestamp_continuity(data, max_delta_time=60):
-    # Calculate the difference between consecutive timestamps
-    data["timestamp_diff"] = data["timestamp"].diff().dt.total_seconds()
-
-    # Identify missing timestamps
-    missing_timestamps = data[data["timestamp_diff"] > max_delta_time]
-
-    # Calculate the number of missing timestamps and the longest delta time
-    num_missing_timestamps = len(missing_timestamps)
-    longest_delta_time = missing_timestamps["timestamp_diff"].max()
-
-    # Drop the temporary column used for validation
-    data.drop(columns=["timestamp_diff"], inplace=True)
-
-    return num_missing_timestamps, longest_delta_time
 
 ###################################################################
 # MAIN
@@ -219,27 +236,69 @@ merged_data.to_csv("merged_data.csv", index=False)
 print("Début de la simulation...")
 # ---- Exécution sur les données des fichiers CSV ----
 results = []
+energy_consumption_Wh_total=0
+energy_production_Wh_total=0
+simulated_energy_consumption_Wh_total = 0
+battery_cycle_total = 0
+
 for i in range(len(merged_data)):
     timestamp = merged_data.iloc[i]["timestamp"]
-    day = timestamp.weekday()
+    weekday = timestamp.weekday()
     hour = timestamp.hour
-    print(f"DEBUG: timestamp={timestamp}, day={day}, hour={hour}")
 
-    production = [int(merged_data.iloc[i]["solar_production"] / 3)] * 3
-    print(f"DEBUG: production={production}")
+    #print(f"Timestamp: {timestamp}")
 
-    consumption_phase_a = int(merged_data.iloc[i][f"phase_a"])
-    consumption_phase_b = int(merged_data.iloc[i][f"phase_b"])
-    consumption_phase_c = int(merged_data.iloc[i][f"phase_c"])
-    print(f"DEBUG: consumption_phase_a={consumption_phase_a}, consumption_phase_b={consumption_phase_b}, consumption_phase_c={consumption_phase_c}")
+    # Statistics without the battery
+    solar_production_watts = [int(merged_data.iloc[i]["solar_production"] / 3)] * 3
+    house_consumption_watts = [int(merged_data.iloc[i][f"phase_{phase}"]) for phase in ["a", "b", "c"]]
+    # - House consumption
+    energy_house_consumption_Wh_phase_a=calculate_energy_Wh(house_consumption_watts[0],1)
+    energy_house_consumption_Wh_phase_b=calculate_energy_Wh(house_consumption_watts[1],1)
+    energy_house_consumption_Wh_phase_c=calculate_energy_Wh(house_consumption_watts[2],1)
+    energy_consumption_Wh_total+=energy_house_consumption_Wh_phase_a+energy_house_consumption_Wh_phase_b+energy_house_consumption_Wh_phase_c
+    #print(f"House consumption: phase A: {int(energy_house_consumption_Wh_phase_a)} Wh, phase B: {int(energy_house_consumption_Wh_phase_b)} Wh, phase C: {int(energy_house_consumption_Wh_phase_c)} Wh")
+
+    # - Solar production
+    energy_solar_production_Wh_phase_a=calculate_energy_Wh(solar_production_watts[0],1)
+    energy_solar_production_Wh_phase_b=calculate_energy_Wh(solar_production_watts[1],1)
+    energy_solar_production_Wh_phase_c=calculate_energy_Wh(solar_production_watts[2],1)
+    energy_production_Wh_total += energy_solar_production_Wh_phase_a+energy_solar_production_Wh_phase_b+energy_solar_production_Wh_phase_c
+
+    # Simulation with the battery
+    result = simulate_battery_behavior(house_consumption_watts, hour, weekday)
+    # - House consumption
+    simulated_energy_house_consumption_Wh_phase_a=int(calculate_energy_Wh(result["phase1"]["New_House_Grid_power_watts"],1))
+    simulated_energy_house_consumption_Wh_phase_b=int(calculate_energy_Wh(result["phase2"]["New_House_Grid_power_watts"],1))
+    simulated_energy_house_consumption_Wh_phase_c=int(calculate_energy_Wh(result["phase3"]["New_House_Grid_power_watts"],1))
+    simulated_energy_consumption_Wh_total += simulated_energy_house_consumption_Wh_phase_a+simulated_energy_house_consumption_Wh_phase_b+simulated_energy_house_consumption_Wh_phase_c
+    #print(f"Simulated house consumption: phase A: {simulated_energy_house_consumption_Wh_phase_a} Wh, phase B: {simulated_energy_house_consumption_Wh_phase_b} Wh, phase C: {simulated_energy_house_consumption_Wh_phase_c} Wh")
+
+    battery_cycle_total += result["phase1"]["Battery_cycle"] + result["phase2"]["Battery_cycle"] + result["phase3"]["Battery_cycle"]
+
+    #print(f"Energy in battery: phase A: {int(result['phase1']['Energy_in_battery_Wh'])} Wh, "
+    #    f"phase B: {int(result['phase2']['Energy_in_battery_Wh'])} Wh, "
+    #    f"phase C: {int(result['phase3']['Energy_in_battery_Wh'])} Wh")
+    #print(f"Status: phase A: {result['phase1']['Status']}, "
+    #    f"phase B: {result['phase2']['Status']}, "
+    #    f"phase C: {result['phase3']['Status']}")
+    #print(f"Tarif: {result['Tarif']} CHF/kWh")
+
+
     # Sleep 0.5 seconds to simulate processing time
-    time.sleep(0.01)
+    #time.sleep(0.01)
+    
 
-    #consumption = [merged_data.iloc[i][f"phase{j+1}"] for j in range(3)]
+print("Simulation terminée: ")
+print(f"- Solar energy produced:     {int(energy_production_Wh_total)} Wh")
+print(f"- Current energy consumed:   {int(energy_consumption_Wh_total)} Wh")
+print(f"- Simulated energy consumed: {int(simulated_energy_consumption_Wh_total)} Wh")
+print(f"- Energy saved:              {int(energy_consumption_Wh_total - simulated_energy_consumption_Wh_total)} Wh")
+print("Total energy in battery:")
+print(f"- phase 1: {int(energy_in_battery_Wh[0])} Wh")
+print(f"- phase 2: {int(energy_in_battery_Wh[1])} Wh")
+print(f"- phase 3: {int(energy_in_battery_Wh[2])} Wh")
 
-    #result = simulate_battery_behavior(production, consumption, hour, day)
-    #results.append({"timestamp": timestamp, **result})
-
+print(f"Total battery cycles: {battery_cycle_total}")
 # ---- Export des résultats ----
 #pd.DataFrame(results).to_csv("battery_simulation_results.csv", index=False)
 #print("Simulation terminée et exportée vers battery_simulation_results.csv")
