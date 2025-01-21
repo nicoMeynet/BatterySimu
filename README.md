@@ -10,6 +10,8 @@ This project is a Python-based battery simulator that models the behavior of a 3
 
 In recent years, plugin battery systems have become increasingly popular due to their ease of installation—requiring no electrician for setup. However, evaluating whether these systems are economically beneficial remains a challenge. The goal of this script is to help users make informed decisions by simulating and analyzing the financial impact of such systems.
 
+Example of plug and play battery: Zendure hyper 2000
+
 ## Features
 - Models a 3-phase battery system with configurable capacity and power.
 - Calculates battery efficiency and lifecycle.
