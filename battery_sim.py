@@ -5,13 +5,14 @@ import time
 from tabulate import tabulate
 
 # ---- Paramètres de la batterie ----
-battery_capacity_Wh = [8000, 8000, 8000]  # Capacité de la batterie par phase (Wh)
-max_charge_power_watts = [1800, 1800, 1800]      # Puissance max de charge par phase (W)
+battery_capacity_Wh = [3940, 3940, 3940]  # Capacité de la batterie par phase (Wh)
+max_charge_power_watts = [1200, 1200, 1200]      # Puissance max de charge par phase (W)
 max_discharge_power_watts = [1800, 1800, 1800]   # Puissance max de décharge par phase (W)
 battery_charge_efficiency = 0.9                     # Rendement (90%)
 battery_discharge_efficiency = 0.9                     # Rendement (90%)
 #soc_min = 20                         # Capacité de décharge minimale (%) (State of Charge)
-#battery_cycles = 5000                # Durée de vie de la batterie en cycles
+battery_max_cycles = 5000                # Durée de vie de la batterie en cycles
+battery_cost = 6000                  # Coût de la batterie (CHF)
 
 # ---- Configuration des tarifs d'électricité ----
 tarif_config = {
@@ -159,19 +160,19 @@ print("Informations sur les données chargées")
 solar_start_timestamp = solar_production["timestamp"].min()
 solar_end_timestamp = solar_production["timestamp"].max()
 solar_data_quantity = len(solar_production)
-print(f"+ Solaire - Timestamp: {solar_start_timestamp} to {solar_end_timestamp} with {solar_data_quantity} lines")
+print(f"+ Solaire - Timestamp: {solar_start_timestamp} to {solar_end_timestamp} with {solar_data_quantity} lines (number of days: {(solar_end_timestamp - solar_start_timestamp).days} days)")
 house_phase_a_start_timestamp = house_phase_a["timestamp"].min()
 house_phase_a_end_timestamp = house_phase_a["timestamp"].max()
 house_phase_a_data_quantity = len(house_phase_a)
-print(f"+ Phase A - Timestamp: {house_phase_a_start_timestamp} to {house_phase_a_end_timestamp} with {house_phase_a_data_quantity} lines")
+print(f"+ Phase A - Timestamp: {house_phase_a_start_timestamp} to {house_phase_a_end_timestamp} with {house_phase_a_data_quantity} lines (number of days: {(house_phase_a_end_timestamp - house_phase_a_start_timestamp).days} days)")
 house_phase_b_start_timestamp = house_phase_c["timestamp"].min()
 house_phase_b_end_timestamp = house_phase_c["timestamp"].max()
 house_phase_b_data_quantity = len(house_phase_b)
-print(f"+ Phase B - Timestamp: {house_phase_b_start_timestamp} to {house_phase_b_end_timestamp} with {house_phase_b_data_quantity} lines")
+print(f"+ Phase B - Timestamp: {house_phase_b_start_timestamp} to {house_phase_b_end_timestamp} with {house_phase_b_data_quantity} lines (number of days: {(house_phase_b_end_timestamp - house_phase_b_start_timestamp).days} days)")
 house_phase_c_start_timestamp = house_phase_c["timestamp"].min()
 house_phase_c_end_timestamp = house_phase_c["timestamp"].max()
 house_phase_c_data_quantity = len(house_phase_c)
-print(f"+ Phase C - Timestamp: {house_phase_c_start_timestamp} to {house_phase_c_end_timestamp} with {house_phase_c_data_quantity} lines")
+print(f"+ Phase C - Timestamp: {house_phase_c_start_timestamp} to {house_phase_c_end_timestamp} with {house_phase_c_data_quantity} lines (number of days: {(house_phase_c_end_timestamp - house_phase_c_start_timestamp).days} days)")
 
 # Arrondir les timestamps à la minute
 print("Arrondissement des timestamps à la minute")
@@ -247,6 +248,9 @@ merged_end_timestamp = merged_data["timestamp"].max()
 merged_data_quantity = len(merged_data)
 print(f"+ Merged - Timestamp: {merged_start_timestamp} to {merged_end_timestamp} with {merged_data_quantity} lines")
 
+# Number of days to process
+number_of_data_days = (merged_end_timestamp - merged_start_timestamp).days
+
 # Write the merged data to a new CSV file
 print("Export des données fusionnées vers merged_data.csv")
 merged_data.to_csv("merged_data.csv", index=False)
@@ -254,10 +258,8 @@ merged_data.to_csv("merged_data.csv", index=False)
 print("Début de la simulation...")
 # ---- Exécution sur les données des fichiers CSV ----
 results = []
-energy_consumption_Wh_total=0
 energy_production_Wh_total=0
-simulated_energy_consumption_Wh_total = 0
-battery_cycle_total = 0
+battery_cycle_total = {"phase1": 0, "phase2": 0, "phase3": 0}
 
 # Initialize dictionaries to store injected and consumed energy for each phase and tarif mode
 simulated_injected_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP": 0, "HC": 0}, "phase_c": {"HP": 0, "HC": 0}}
@@ -280,9 +282,7 @@ for i in range(len(merged_data)):
     energy_house_consumption_Wh_phase_a=calculate_energy_Wh(house_consumption_watts[0],1)
     energy_house_consumption_Wh_phase_b=calculate_energy_Wh(house_consumption_watts[1],1)
     energy_house_consumption_Wh_phase_c=calculate_energy_Wh(house_consumption_watts[2],1)
-    energy_consumption_Wh_total+=energy_house_consumption_Wh_phase_a+energy_house_consumption_Wh_phase_b+energy_house_consumption_Wh_phase_c
-    #print(f"House consumption: phase A: {int(energy_house_consumption_Wh_phase_a)} Wh, phase B: {int(energy_house_consumption_Wh_phase_b)} Wh, phase C: {int(energy_house_consumption_Wh_phase_c)} Wh")
-
+   
     # - Solar production
     energy_solar_production_Wh_phase_a=calculate_energy_Wh(solar_production_watts[0],1)
     energy_solar_production_Wh_phase_b=calculate_energy_Wh(solar_production_watts[1],1)
@@ -296,11 +296,11 @@ for i in range(len(merged_data)):
     simulated_energy_house_consumption_Wh_phase_a=calculate_energy_Wh(result["phase1"]["new_house_grid_power_watts"],1)
     simulated_energy_house_consumption_Wh_phase_b=calculate_energy_Wh(result["phase2"]["new_house_grid_power_watts"],1)
     simulated_energy_house_consumption_Wh_phase_c=calculate_energy_Wh(result["phase3"]["new_house_grid_power_watts"],1)
-    simulated_energy_consumption_Wh_total += simulated_energy_house_consumption_Wh_phase_a+simulated_energy_house_consumption_Wh_phase_b+simulated_energy_house_consumption_Wh_phase_c
-    #print(f"Simulated house consumption: phase A: {simulated_energy_house_consumption_Wh_phase_a} Wh, phase B: {simulated_energy_house_consumption_Wh_phase_b} Wh, phase C: {simulated_energy_house_consumption_Wh_phase_c} Wh")
-
+   
     # - Battery energy
-    battery_cycle_total += result["phase1"]["battery_cycle"] + result["phase2"]["battery_cycle"] + result["phase3"]["battery_cycle"]
+    battery_cycle_total["phase1"] += result["phase1"]["battery_cycle"]
+    battery_cycle_total["phase2"] += result["phase2"]["battery_cycle"]
+    battery_cycle_total["phase3"] += result["phase3"]["battery_cycle"]
 
     if(energy_house_consumption_Wh_phase_a < 0):
         if(tarif_mode=="HP"):
@@ -334,7 +334,6 @@ for i in range(len(merged_data)):
             current_consumed_energy_Wh["phase_c"]["HP"] += energy_house_consumption_Wh_phase_c
         else:
             current_consumed_energy_Wh["phase_c"]["HC"] += energy_house_consumption_Wh_phase_c
-
 
     if(simulated_energy_house_consumption_Wh_phase_a < 0):
         if(tarif_mode=="HP"):
@@ -394,15 +393,6 @@ for i in range(len(merged_data)):
     #time.sleep(0.01)
     
 print("****************************************************************************************")
-print("Simulation terminée: ")
-print(f"- Total solar energy produced:     {int(energy_production_Wh_total)} Wh")
-print(f"- Total current energy consumed:   {int(energy_consumption_Wh_total)} Wh")
-print(f"- Total simulated energy consumed: {int(simulated_energy_consumption_Wh_total)} Wh")
-print(f"- Total energy saved:              {int(energy_consumption_Wh_total - simulated_energy_consumption_Wh_total)} Wh")
-print("At the end, total energy in battery:")
-print(f"- phase 1: {int(energy_in_battery_Wh[0])} Wh")
-print(f"- phase 2: {int(energy_in_battery_Wh[1])} Wh")
-print(f"- phase 3: {int(energy_in_battery_Wh[2])} Wh")
 # Data for injected energy
 data_injected = [
     ["Phase A Injected HC", current_injected_energy_Wh['phase_a']['HC'], simulated_injected_energy_Wh['phase_a']['HC'], simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC'], get_current_tarif_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000],
@@ -437,7 +427,10 @@ print("")
 print("Consumed Energy:")
 print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
 
-print(f"Total battery cycles: {battery_cycle_total:.2f}")
-# ---- Export des résultats ----
-#pd.DataFrame(results).to_csv("battery_simulation_results.csv", index=False)
-#print("Simulation terminée et exportée vers battery_simulation_results.csv")
+print("At the end, left energy in battery:")
+
+
+print("Battery statistics:")
+print(f"- cycles: phase 1: {int(battery_cycle_total['phase1'])}, phase 2: {int(battery_cycle_total['phase2'])}, phase 3: {int(battery_cycle_total['phase3'])}")
+print(f"- expected life based on cycle: phase 1: {int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365)} years, phase 2: {int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365)} years, phase 3: {int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365)} years")
+print(f"- Left energy: phase 1: {int(energy_in_battery_Wh[0])} Wh, phase 2: {int(energy_in_battery_Wh[1])} Wh, phase 3: {int(energy_in_battery_Wh[2])} Wh")
