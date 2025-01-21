@@ -3,7 +3,7 @@
 ## Overview
 This project is a Python-based battery simulator that models the behavior of a 3-phase battery system in a residential setup. It calculates energy usage, solar production, and battery behavior to optimize energy consumption and reduce costs. The simulation includes:
 
-- Handling of solar energy production and consumption.
+- Handling of solar energy consumption.
 - Tracking battery charge and discharge cycles.
 - Integration of time-of-use tariffs (peak and off-peak hours).
 - Simulation of energy injected into or consumed from the grid.
@@ -29,30 +29,22 @@ pip install pandas tabulate
 ## Usage
 Run the script with the following command:
 ```bash
-python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv> [<solar_csv>]
+python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>
 ```
 
 ### Arguments
 - `<house_phase_a.csv>`: CSV file containing energy consumption data for Phase A.
 - `<house_phase_b.csv>`: CSV file containing energy consumption data for Phase B.
 - `<house_phase_c.csv>`: CSV file containing energy consumption data for Phase C.
-- `<solar_csv>`: Optional CSV file containing solar production data.
 
 ### Example
 ```bash
-python battery_simulator.py phase_a.csv phase_b.csv phase_c.csv solar.csv
 python battery_simulator.py phase_a.csv phase_b.csv phase_c.csv
 
 ```
 
 ## Input File Format
 Each input CSV file should have the following structure:
-
-### Solar CSV
-| entity_id                                 | state | last_changed           |
-|------------------------------------------|-------|------------------------|
-| sensor.envoy_482310100274_production_d_electricite_actuelle | 0     | 2024-12-31T23:00:00Z |
-| sensor.envoy_482310100274_production_d_electricite_actuelle | 0     | 2025-01-01T00:00:00Z |
 
 ### Phase CSV (A, B, C)
 | entity_id                                    | state       | last_changed           |
@@ -67,10 +59,10 @@ The script performs the following preprocessing steps:
 - Fills missing timestamps with interpolated values.
 
 ## Outputs
-1. **Merged Data File**: A CSV file (`merged_data.csv`) containing merged solar and consumption data.
-2. **Simulation Results**: Detailed energy statistics printed to the console, including:
+1. **Simulation Results**: Detailed energy statistics printed to the console, including:
    - Energy injected and consumed during peak (HP) and off-peak (HC) hours.
    - Delta values for energy usage and associated cost differences.
+   - Rentability of the battery
    - Battery lifecycle statistics.
 
 ### Example Output for 337 days

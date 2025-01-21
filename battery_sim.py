@@ -134,25 +134,19 @@ def simulate_battery_behavior(house_grid_power_watts):
 ###################################################################
 # ---- Reading CSV files from the command line ----
 if len(sys.argv) < 4 or len(sys.argv) > 5:
-    print("Usage: python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv> [<solar_csv>]")
+    print("Usage: python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>")
     sys.exit(1)
 
 house_phase_a_file = sys.argv[1]
 house_phase_b_file = sys.argv[2]
 house_phase_c_file = sys.argv[3]
-solar_file = sys.argv[4] if len(sys.argv) == 5 else None
 
 # Loading CSV files
 print("Loading CSV files")
 house_phase_a = pd.read_csv(house_phase_a_file, parse_dates=["last_changed"])
 house_phase_b = pd.read_csv(house_phase_b_file, parse_dates=["last_changed"])
 house_phase_c = pd.read_csv(house_phase_c_file, parse_dates=["last_changed"])
-if solar_file:
-    solar_production = pd.read_csv(solar_file, parse_dates=["last_changed"])
-else:
-    # Create an empty DataFrame with the same structure if solar_file is not provided
-    solar_production = pd.DataFrame(columns=["timestamp", "solar_production"])
-print(f"+ Successfully loaded {house_phase_a_file} {house_phase_b_file} {house_phase_c_file} {solar_file}")
+print(f"+ Successfully loaded {house_phase_a_file} {house_phase_b_file} {house_phase_c_file}")
 
 # Data formatting (cleaning, transformation, etc.)
 print("Formatting data")
@@ -162,9 +156,6 @@ house_phase_b.drop(columns=["entity_id"], inplace=True)
 house_phase_b.rename(columns={"last_changed": "timestamp", "state": "phase_b"}, inplace=True)
 house_phase_c.drop(columns=["entity_id"], inplace=True)
 house_phase_c.rename(columns={"last_changed": "timestamp", "state": "phase_c"}, inplace=True)
-if not solar_production.empty:
-    solar_production.rename(columns={"last_changed": "timestamp", "state": "solar_production"}, inplace=True)
-    solar_production.drop(columns=["entity_id"], inplace=True)
 print(f"+ Successfully formatted")
 
 # Display information about the loaded data
@@ -181,19 +172,12 @@ house_phase_c_start_timestamp = house_phase_c["timestamp"].min()
 house_phase_c_end_timestamp = house_phase_c["timestamp"].max()
 house_phase_c_data_quantity = len(house_phase_c)
 print(f"+ Phase C - Timestamp: {house_phase_c_start_timestamp} to {house_phase_c_end_timestamp} with {house_phase_c_data_quantity} lines (number of days: {(house_phase_c_end_timestamp - house_phase_c_start_timestamp).days} days)")
-if not solar_production.empty:
-    solar_start_timestamp = solar_production["timestamp"].min()
-    solar_end_timestamp = solar_production["timestamp"].max()
-    solar_data_quantity = len(solar_production)
-    print(f"+ Solar - Timestamp: {solar_start_timestamp} to {solar_end_timestamp} with {solar_data_quantity} lines (number of days: {(solar_end_timestamp - solar_start_timestamp).days} days)")
 
 # Round timestamps to the nearest minute
 print("Rounding timestamps to the nearest minute")
 house_phase_a["timestamp"] = house_phase_a["timestamp"].dt.floor("min")
 house_phase_b["timestamp"] = house_phase_b["timestamp"].dt.floor("min")
 house_phase_c["timestamp"] = house_phase_c["timestamp"].dt.floor("min")
-if not solar_production.empty:
-    solar_production["timestamp"] = solar_production["timestamp"].dt.floor("min")
 print("+ Successfully rounded timestamps")
 
 # Sort columns to have 'timestamp' first
@@ -204,9 +188,6 @@ columns_order = ["timestamp"] + [col for col in house_phase_b.columns if col != 
 house_phase_b = house_phase_b[columns_order]
 columns_order = ["timestamp"] + [col for col in house_phase_c.columns if col != "timestamp"]
 house_phase_c = house_phase_c[columns_order]
-if not solar_production.empty:
-    columns_order = ["timestamp"] + [col for col in solar_production.columns if col != "timestamp"]
-    solar_production = solar_production[columns_order]
 print("+ Successfully sorted columns")
 
 # Group by timestamp and calculate the mean of the phase column
@@ -220,10 +201,6 @@ house_phase_b = house_phase_b.groupby("timestamp").agg({"phase_b": "mean"}).rese
 house_phase_c["phase_c"] = pd.to_numeric(house_phase_c["phase_c"], errors="coerce")
 house_phase_c = house_phase_c.dropna(subset=["phase_c"])
 house_phase_c = house_phase_c.groupby("timestamp").agg({"phase_c": "mean"}).reset_index()
-if not solar_production.empty:
-    solar_production["solar_production"] = pd.to_numeric(solar_production["solar_production"], errors="coerce")
-    solar_production = solar_production.dropna(subset=["solar_production"])
-    solar_production = solar_production.groupby("timestamp").agg({"solar_production": "mean"}).reset_index()
 print("+ Successfully grouped data by timestamp")
 
 # Fill missing timestamps in phase A with an average value between the values before and after the missing timestamp
@@ -245,18 +222,10 @@ house_phase_c = house_phase_c.set_index("timestamp").reindex(all_timestamps).ren
 house_phase_c["phase_c"] = house_phase_c["phase_c"].interpolate(method='linear').apply(lambda x: int(x))
 print("+ Successfully filled missing timestamps in phase C")
 
-# Fill missing timestamps in solar production with an average value between the values before and after the missing timestamp
-if not solar_production.empty:
-    all_timestamps = pd.date_range(start=solar_start_timestamp, end=solar_end_timestamp, freq='min')
-    solar_production = solar_production.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-    solar_production["solar_production"] = solar_production["solar_production"].interpolate(method='linear').apply(lambda x: int(x))
-    print("+ Successfully filled missing timestamps in solar production")
-
 # Merge the 4 datasets based on the timestamp, filling missing values with 0
 print("Merging data into a single table")
 merged_data = house_phase_a.merge(house_phase_b, on="timestamp", how="outer")
 merged_data = merged_data.merge(house_phase_c, on="timestamp", how="outer")
-merged_data = merged_data.merge(solar_production, on="timestamp", how="outer")
 print("+ Successfully merged data")
 
 # Fill missing values with 0
@@ -300,18 +269,11 @@ for i in range(len(merged_data)):
     tarif_mode = get_current_tarif_mode(hour, weekday)
 
     # Statistics without the battery
-    solar_production_watts = [merged_data.iloc[i]["solar_production"] / 3] * 3
     house_consumption_watts = [merged_data.iloc[i][f"phase_{phase}"] for phase in ["a", "b", "c"]]
     # - House consumption
     energy_house_consumption_Wh_phase_a=calculate_energy_Wh(house_consumption_watts[0],1)
     energy_house_consumption_Wh_phase_b=calculate_energy_Wh(house_consumption_watts[1],1)
     energy_house_consumption_Wh_phase_c=calculate_energy_Wh(house_consumption_watts[2],1)
-   
-    # - Solar production
-    energy_solar_production_Wh_phase_a=calculate_energy_Wh(solar_production_watts[0],1)
-    energy_solar_production_Wh_phase_b=calculate_energy_Wh(solar_production_watts[1],1)
-    energy_solar_production_Wh_phase_c=calculate_energy_Wh(solar_production_watts[2],1)
-    energy_production_Wh_total += energy_solar_production_Wh_phase_a+energy_solar_production_Wh_phase_b+energy_solar_production_Wh_phase_c
 
     # Simulation with the battery
     result = simulate_battery_behavior(house_consumption_watts)
