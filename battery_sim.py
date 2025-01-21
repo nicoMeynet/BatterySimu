@@ -374,6 +374,6 @@ print(f"+ Amortization time: {battery_cost / total_gain_CHF * number_of_data_day
 
 print("")
 print("Battery statistics:")
-print(f"- Cycles: phase 1: {int(battery_cycle_total['phase1'])}, phase 2: {int(battery_cycle_total['phase2'])}, phase 3: {int(battery_cycle_total['phase3'])}")
-print(f"- Expected life based on cycles: phase 1: {int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365)} years, phase 2: {int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365)} years, phase 3: {int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365)} years")
-print(f"- Remaining Energy: phase 1: {int(energy_in_battery_Wh[0])} Wh, phase 2: {int(energy_in_battery_Wh[1])} Wh, phase 3: {int(energy_in_battery_Wh[2])} Wh")
+print(f"+ Cycles: phase 1: {int(battery_cycle_total['phase1'])}, phase 2: {int(battery_cycle_total['phase2'])}, phase 3: {int(battery_cycle_total['phase3'])}")
+print(f"+ Expected life based on cycles: phase 1: {int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365)} years, phase 2: {int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365)} years, phase 3: {int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365)} years")
+print(f"+ Remaining Energy: phase 1: {int(energy_in_battery_Wh[0])} Wh, phase 2: {int(energy_in_battery_Wh[1])} Wh, phase 3: {int(energy_in_battery_Wh[2])} Wh")
