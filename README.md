@@ -1,22 +1,38 @@
 # Battery Simulator
 
 ## Overview
-This project is a Python-based battery simulator that models the behavior of a 3-phase battery system in a residential setup. It calculates energy usage, solar production, and battery behavior to optimize energy consumption and reduce costs. The simulation includes:
+The Battery Simulator is a Python-based tool designed to optimize residential energy consumption using a 3-phase battery system. By modeling battery behavior and calculating energy flows, the simulator provides insights into energy usage, cost savings, and the financial viability of battery systems in real-world scenarios. This tool empowers homeowners to make data-driven decisions about integrating battery systems into their energy setups, including determining the optimal sizing of the system, the number of batteries per phase, and the charging and discharging power required per phase.
 
-- Handling of solar energy consumption.
-- Tracking battery charge and discharge cycles.
-- Integration of time-of-use tariffs (peak and off-peak hours).
-- Simulation of energy injected into or consumed from the grid.
+Key benefits include:
+- **Technical:** Simulates energy flows and battery performance with precision.
+- **Financial:** Provides detailed analysis of cost savings and rentability.
+- **Operational:** Easily integrates with Home Assistant CSV data for seamless modeling.
 
-In recent years, plugin battery systems have become increasingly popular due to their ease of installation—requiring no electrician for setup. However, evaluating whether these systems are economically beneficial remains a challenge. The goal of this script is to help users make informed decisions by simulating and analyzing the financial impact of such systems.
+### Why Plug-and-Play Batteries?
+In recent years, plug-and-play battery systems have surged in popularity due to their ease of installation—no electrician required. Technological advancements and decreasing costs have made these systems more accessible for residential use. However, understanding their economic feasibility remains challenging.
 
-Example of plug and play battery: "Zendure hyper 2000" ou "Sunology Storey"
+#### Examples of plug-and-play batteries:
+- **Zendure Hyper 2000:** Known for its portability and user-friendly setup.
+- **Sunology Storey:** Offers scalability and efficient energy storage for small households.
+
+The Battery Simulator aims to simplify this evaluation process by analyzing the potential savings, operational impact, and optimal configuration of these systems.
 
 ## Features
+### Technical Features
 - Models a 3-phase battery system with configurable capacity and power.
-- Calculates battery efficiency and lifecycle.
 - Handles time-based tariffs for energy consumption and injection.
 - Provides detailed statistics on energy usage and battery behavior.
+- Includes preprocessing of input data with timestamp interpolation.
+
+### Financial Features
+- Calculates battery efficiency and lifecycle.
+- Estimates cost savings and rentability of battery systems.
+- Accounts for peak and off-peak energy tariffs to optimize savings.
+
+### Operational Features
+- Supports CSV-based input from Home Assistant for seamless integration.
+- Offers configurability for battery parameters and tariff structures.
+- Simulates charging and discharging cycles for real-world scenarios.
 
 ## Requirements
 - Python 3.7+
@@ -69,7 +85,7 @@ The script performs the following preprocessing steps:
    - Rentability of the battery
    - Battery lifecycle statistics.
 
-### Example Output for 337 days
+### Example Output with a dataset of 337 days
 #### Injected Energy
 
 | Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
@@ -139,11 +155,37 @@ The following parameters can be configured in the script:
 - `battery_max_cycles`: Maximum battery cycles (default: 5000).
 - `battery_cost`: Total cost of the battery (CHF).
 
+#### Example Configuration
+Below is an example of configuring the script for a 10 kWh battery system:
+```python
+battery_capacity_Wh = [3940, 3940, 3940]        # Battery capacity per phase (Wh)
+max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)
+max_discharge_power_watts = [1200, 1200, 1200]  # Max discharge power per phase (W)
+battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
+battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
+battery_max_cycles = 6000                       # Battery lifespan in cycles
+battery_cost = 5847                             # Battery cost (CHF)
+```
+
 ### Tariff Configuration
 - `tariff_consume`: Cost of consuming energy (CHF/kWh).
 - `tariff_inject`: Cost of injecting energy (CHF/kWh).
 - `days`: Days for peak tariffs (Monday to Friday).
 - `hours`: Hours for peak tariffs (17:00 to 22:00).
+
+#### Example Tariff Configuration
+```python
+"peak": {
+    "tariff_consume": 0.34,      # CHF/kWh
+    "tariff_inject": 0.10,       # CHF/kWh
+    "days": [0, 1, 2, 3, 4],     # Monday to Friday
+    "hours": range(17, 22)       # 5 PM to 10 PM
+},
+"off_peak": {
+    "tariff_consume": 0.34,      # CHF/kWh for the rest of the time
+    "tariff_inject": 0.10        # CHF/kWh for the rest of the time
+}
+```
 
 ## License
 This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
