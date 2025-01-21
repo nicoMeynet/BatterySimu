@@ -120,7 +120,7 @@ Consumed Energy:
 
 #### Rentability
 - **Total gain**: 955 CHF for 337 days
-- **Amortization time**: 5.80 years
+- **Amortization time**: 5.80 years if the cost of the battery is 6000 CHF
 
 #### Battery Statistics
 - **Cycles**: phase 1: 215, phase 2: 195, phase 3: 172
@@ -137,7 +137,7 @@ The following parameters can be configured in the script:
 - `battery_charge_efficiency`: Charge efficiency (default: 90%).
 - `battery_discharge_efficiency`: Discharge efficiency (default: 90%).
 - `battery_max_cycles`: Maximum battery cycles (default: 5000).
-- `battery_cost`: Cost of the battery (CHF).
+- `battery_cost`: Total cost of the battery (CHF).
 
 ### Tariff Configuration
 - `tariff_consume`: Cost of consuming energy (CHF/kWh).
