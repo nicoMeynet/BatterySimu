@@ -28,18 +28,20 @@ pip install pandas tabulate
 ## Usage
 Run the script with the following command:
 ```bash
-python battery_simulator.py <solar_csv> <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>
+python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv> [<solar_csv>]
 ```
 
 ### Arguments
-- `<solar_csv>`: CSV file containing solar production data.
 - `<house_phase_a.csv>`: CSV file containing energy consumption data for Phase A.
 - `<house_phase_b.csv>`: CSV file containing energy consumption data for Phase B.
 - `<house_phase_c.csv>`: CSV file containing energy consumption data for Phase C.
+- `<solar_csv>`: Optional CSV file containing solar production data.
 
 ### Example
 ```bash
-python battery_simulator.py solar.csv phase_a.csv phase_b.csv phase_c.csv
+python battery_simulator.py phase_a.csv phase_b.csv phase_c.csv solar.csv
+python battery_simulator.py phase_a.csv phase_b.csv phase_c.csv
+
 ```
 
 ## Input File Format
@@ -74,45 +76,45 @@ The script performs the following preprocessing steps:
 #### Injected Energy
 ```plaintext
 Injected Energy:
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase               |   Current (Wh) |   Simulated (Wh) |   Delta (Wh) |   Delta (CHF) |
-+=====================+================+==================+==============+===============+
-| Phase A Injected HC |        50741.2 |          12809.3 |     -37931.9 |       3.79319 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase A Injected HP |            0   |              0   |          0   |       0       |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase B Injected HC |        57892.9 |          17238.8 |     -40654.2 |       4.06542 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase B Injected HP |            0   |              0   |          0   |       0       |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase C Injected HC |        59030.6 |          17433   |     -41597.6 |       4.15976 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase C Injected HP |            0   |              0   |          0   |       0       |
-+---------------------+----------------+------------------+--------------+---------------+
-| Total Injected      |       167665   |          47481.1 |    -120184   |      12.0184  |
-+---------------------+----------------+------------------+--------------+---------------+
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase                     |   Current (kWh) |   Simulated (kWh) |   Delta (kWh) |   Delta (CHF) |
++===========================+=================+===================+===============+===============+
+| Phase A Injected Off-Peak |            1782 |               843 |          -939 |            93 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase A Injected Peak     |               0 |                 0 |             0 |             0 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase B Injected Off-Peak |            2169 |              1315 |          -854 |            85 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase B Injected Peak     |               0 |                 0 |             0 |             0 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase C Injected Off-Peak |            2374 |              1620 |          -753 |            75 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase C Injected Peak     |               3 |                 3 |             0 |             0 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Total Injected            |            6328 |              3781 |         -2546 |           253 |
++---------------------------+-----------------+-------------------+---------------+---------------+
 ```
 
 #### Consumed Energy
 ```plaintext
 Consumed Energy:
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase               |   Current (Wh) |   Simulated (Wh) |   Delta (Wh) |   Delta (CHF) |
-+=====================+================+==================+==============+===============+
-| Phase A Consumed HC |       108909   |          85912.4 |    -22996.4  |       7.81876 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase A Consumed HP |        37827.6 |          28609.3 |     -9218.28 |       3.13422 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase B Consumed HC |        79603.8 |          57703.4 |    -21900.4  |       7.44612 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase B Consumed HP |        38817.5 |          24239.1 |    -14578.5  |       4.95668 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase C Consumed HC |        73280.5 |          51744.3 |    -21536.2  |       7.32231 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Phase C Consumed HP |        37827   |          23630.2 |    -14196.8  |       4.82691 |
-+---------------------+----------------+------------------+--------------+---------------+
-| Total Consumed      |       376265   |         271839   |   -104426    |      35.505   |
-+---------------------+----------------+------------------+--------------+---------------+
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase                     |   Current (kWh) |   Simulated (kWh) |   Delta (kWh) |   Delta (CHF) |
++===========================+=================+===================+===============+===============+
+| Phase A Consumed Off-Peak |            1424 |               953 |          -471 |           160 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase A Consumed Peak     |             495 |               202 |          -293 |            99 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase B Consumed Off-Peak |             891 |               449 |          -441 |           150 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase B Consumed Peak     |             363 |               111 |          -251 |            85 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase C Consumed Off-Peak |             708 |               303 |          -404 |           137 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Phase C Consumed Peak     |             299 |                89 |          -209 |            71 |
++---------------------------+-----------------+-------------------+---------------+---------------+
+| Total Consumed            |            4180 |              2107 |         -2069 |           702 |
++---------------------------+-----------------+-------------------+---------------+---------------+
 ```
 
 #### Battery Statistics
@@ -139,10 +141,10 @@ The following parameters can be configured in the script:
 - `battery_cost`: Cost of the battery (CHF).
 
 ### Tariff Configuration
-- `tarif_consume`: Cost of consuming energy (CHF/kWh).
-- `tarif_inject`: Cost of injecting energy (CHF/kWh).
-- `jours`: Days for peak tariffs (Monday to Friday).
-- `heures`: Hours for peak tariffs (17:00 to 22:00).
+- `tariff_consume`: Cost of consuming energy (CHF/kWh).
+- `tariff_inject`: Cost of injecting energy (CHF/kWh).
+- `days`: Days for peak tariffs (Monday to Friday).
+- `hours`: Hours for peak tariffs (17:00 to 22:00).
 
 ## License
 This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
