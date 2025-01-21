@@ -1,8 +1,18 @@
 #! /usr/bin/python3
+"""
+Battery Simulation Script
+This script simulates the behavior of a battery system in a house with three phases (A, B, and C). 
+It reads power consumption data from CSV files, processes the data, and simulates the battery's 
+charging and discharging behavior based on the house's power consumption and predefined battery 
+parameters. The script also calculates the financial impact of using the battery system.
+"""
 import pandas as pd
 import sys
 from tabulate import tabulate
 
+###################################################################
+# CONFIGURATION
+###################################################################
 # ---- Battery parameters ----
 battery_capacity_Wh = [3940, 3940, 3940]        # Battery capacity per phase (Wh)
 max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)
@@ -11,6 +21,7 @@ battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
 battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 6000                       # Battery lifespan in cycles
 battery_cost = 5847                             # Battery cost (CHF)
+battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
 
 # ---- Electricity tariff configuration ----
 tariff_config = {
@@ -26,14 +37,9 @@ tariff_config = {
     }
 }
 
-# ---- Initial battery state ----
-battery_soc = [100, 100, 100]  # Initial state of charge in %
-energy_in_battery_Wh = [battery_capacity_Wh[i] * (battery_soc[i] / 100) for i in range(3)]
-print("Initial battery state:")
-print(f"+ phase 1: {energy_in_battery_Wh[0]} kWh")
-print(f"+ phase 2: {energy_in_battery_Wh[1]} kWh")
-print(f"+ phase 3: {energy_in_battery_Wh[2]} kWh")
-
+###################################################################
+# FUNCTIONS
+###################################################################
 # ---- Function to determine the current tariff mode ----
 # HP = Peak Hours
 # HC = Off-Peak Hours
@@ -136,7 +142,6 @@ def simulate_battery_behavior(house_grid_power_watts):
         }
     }
 
-
 ###################################################################
 # MAIN
 ###################################################################
@@ -144,10 +149,16 @@ def simulate_battery_behavior(house_grid_power_watts):
 if len(sys.argv) < 4 or len(sys.argv) > 5:
     print("Usage: python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>")
     sys.exit(1)
-
 house_phase_a_file = sys.argv[1]
 house_phase_b_file = sys.argv[2]
 house_phase_c_file = sys.argv[3]
+
+# Initial battery state
+energy_in_battery_Wh = [battery_capacity_Wh[i] * (battery_soc[i] / 100) for i in range(3)]
+print("Initial battery state:")
+print(f"+ phase 1: {energy_in_battery_Wh[0]} kWh")
+print(f"+ phase 2: {energy_in_battery_Wh[1]} kWh")
+print(f"+ phase 3: {energy_in_battery_Wh[2]} kWh")
 
 # Loading CSV files
 print("Loading CSV files")
@@ -345,30 +356,6 @@ for i in range(len(merged_data)):
         "discharge_power_phase2_W": sim_result["phase2"]["discharge_power_watts"],
         "discharge_power_phase3_W": sim_result["phase3"]["discharge_power_watts"]
     })
-
-    #print("****************************************************************************************")
-    #print(f"Timestamp: {timestamp}")
-    #print(f"House consumption:"
-    #    f"phase A: {int(energy_house_consumption_Wh_phase_a)} Wh, "
-    #    f"phase B: {int(energy_house_consumption_Wh_phase_b)} Wh, "
-    #    f"phase C: {int(energy_house_consumption_Wh_phase_c)} Wh")
-    #print(f"Simulated house consumption:"
-    #    f"phase A: {int(simulated_energy_house_consumption_Wh_phase_a)} Wh, "
-    #    f"phase B: {int(simulated_energy_house_consumption_Wh_phase_b)} Wh, "
-    #    f"phase C: {int(simulated_energy_house_consumption_Wh_phase_c)} Wh")
-    #print(f"Energy in battery:"
-    #    f"phase A: {int(result['phase1']['energy_in_battery_Wh'])} Wh, "
-    #    f"phase B: {int(result['phase2']['energy_in_battery_Wh'])} Wh, "
-    #    f"phase C: {int(result['phase3']['energy_in_battery_Wh'])} Wh")
-    #print(f"Battery status:"
-    #    f"phase A: {result['phase1']['battery_status']}, "
-    #    f"phase B: {result['phase2']['battery_status']}, "
-    #    f"phase C: {result['phase3']['battery_status']}")
-    #print(f"Tarif mode: {tarif_mode}")
-
-
-    # DEBUG: Sleep X seconds to simulate processing time
-    #time.sleep(0.01)
 
 # Convert results to DataFrame and export to CSV
 results_df = pd.DataFrame(results)
