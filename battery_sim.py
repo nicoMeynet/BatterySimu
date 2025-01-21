@@ -9,8 +9,8 @@ max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)
 max_discharge_power_watts = [1200, 1200, 1200]  # Max discharge power per phase (W)
 battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
 battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
-battery_max_cycles = 5000                       # Battery lifespan in cycles
-battery_cost = 6000                             # Battery cost (CHF)
+battery_max_cycles = 6000                       # Battery lifespan in cycles
+battery_cost = 5847                             # Battery cost (CHF)
 
 # ---- Electricity tariff configuration ----
 tariff_config = {
