@@ -72,7 +72,7 @@ The script performs the following preprocessing steps:
    - Delta values for energy usage and associated cost differences.
    - Battery lifecycle statistics.
 
-### Example Output
+### Example Output for 337 days
 #### Injected Energy
 ```plaintext
 Injected Energy:
