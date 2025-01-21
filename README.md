@@ -47,6 +47,7 @@ python battery_simulator.py phase_a.csv phase_b.csv phase_c.csv
 ```
 
 ## Input File Format
+The CSV file containing the measurements is sourced from Home Assistant, which collects energy consumption data for each phase using a Shelly 3EM module.
 Each input CSV file should have the following structure:
 
 ### Phase CSV (A, B, C)
