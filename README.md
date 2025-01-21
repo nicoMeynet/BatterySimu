@@ -119,6 +119,7 @@ Consumed Energy:
 - **Amortization time**: 5.80 years if the cost of the battery is 6000 CHF
 
 #### Battery Statistics
+- **Max cycles**: 5000 (config)
 - **Cycles**: phase 1: 215, phase 2: 195, phase 3: 172
 - **Expected life based on cycles**: phase 1: 21 years, phase 2: 23 years, phase 3: 26 years
 - **Remaining Energy**: phase 1: -2 Wh, phase 2: 2870 Wh, phase 3: 0 Wh
