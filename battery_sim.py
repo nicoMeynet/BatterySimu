@@ -252,8 +252,8 @@ print(f"+ Merged - Timestamp: {merged_start_timestamp} to {merged_end_timestamp}
 number_of_data_days = (merged_end_timestamp - merged_start_timestamp).days
 
 # Write the merged data to a new CSV file
-print("Export des données fusionnées vers merged_data.csv")
-merged_data.to_csv("merged_data.csv", index=False)
+#print("Export des données fusionnées vers merged_data.csv")
+#merged_data.to_csv("merged_data.csv", index=False)
 
 print("Début de la simulation...")
 # ---- Exécution sur les données des fichiers CSV ----
