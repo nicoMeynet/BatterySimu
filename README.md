@@ -85,7 +85,7 @@ The script performs the following preprocessing steps:
    - Rentability of the battery
    - Battery lifecycle statistics.
 
-### Example Output with a dataset of 337 days
+### Example Output with a dataset of 15 days
 #### Injected Energy
 
 | Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
