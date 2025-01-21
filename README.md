@@ -117,6 +117,10 @@ Consumed Energy:
 +---------------------------+-----------------+-------------------+---------------+---------------+
 ```
 
+#### Rentability
+- **Total gain**: 43 CHF for 15 days
+- **Amortization time**: 5 years
+
 #### Battery Statistics
 - **Cycles**: Phase 1: 8, Phase 2: 9, Phase 3: 9
 - **Expected Life**:

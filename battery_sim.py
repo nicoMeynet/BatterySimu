@@ -60,6 +60,13 @@ def get_current_tariff_price(tariff_mode, action):
 def calculate_energy_Wh(power_watts, duration_minutes):
     return power_watts * duration_minutes / 60
 
+# ---- Update the consumed or injected energy for a given phase and tariff mode ----
+def update_energy(energy, tarif_mode, consumed_dict, injected_dict, phase):
+    if energy < 0:
+        injected_dict[phase][tarif_mode] += abs(energy)
+    else:
+        consumed_dict[phase][tarif_mode] += energy
+
 # ---- Simulation ----
 def simulate_battery_behavior(house_grid_power_watts):
     global energy_in_battery_Wh
@@ -319,71 +326,25 @@ for i in range(len(merged_data)):
     battery_cycle_total["phase2"] += result["phase2"]["battery_cycle"]
     battery_cycle_total["phase3"] += result["phase3"]["battery_cycle"]
 
-    if(energy_house_consumption_Wh_phase_a < 0):
-        if(tarif_mode=="HP"):
-            current_injected_energy_Wh["phase_a"]["HP"] += abs(energy_house_consumption_Wh_phase_a)
-        else:
-            current_injected_energy_Wh["phase_a"]["HC"] += abs(energy_house_consumption_Wh_phase_a)
-    else:
-        if(tarif_mode=="HP"):
-            current_consumed_energy_Wh["phase_a"]["HP"] += energy_house_consumption_Wh_phase_a
-        else:
-            current_consumed_energy_Wh["phase_a"]["HC"] += energy_house_consumption_Wh_phase_a
-    
-    if(energy_house_consumption_Wh_phase_b < 0):
-        if(tarif_mode=="HP"):
-            current_injected_energy_Wh["phase_b"]["HP"] += abs(energy_house_consumption_Wh_phase_b)
-        else:
-            current_injected_energy_Wh["phase_b"]["HC"] += abs(energy_house_consumption_Wh_phase_b)
-    else:
-        if(tarif_mode=="HP"):
-            current_consumed_energy_Wh["phase_b"]["HP"] += energy_house_consumption_Wh_phase_b
-        else:
-            current_consumed_energy_Wh["phase_b"]["HC"] += energy_house_consumption_Wh_phase_b
+    # List of phases and tariff modes
+    phases = ["phase_a", "phase_b", "phase_c"]
+    tariff_modes = ["HP", "HC"]
 
-    if(energy_house_consumption_Wh_phase_c < 0):
-        if(tarif_mode=="HP"):
-            current_injected_energy_Wh["phase_c"]["HP"] += abs(energy_house_consumption_Wh_phase_c)
-        else:
-            current_injected_energy_Wh["phase_c"]["HC"] += abs(energy_house_consumption_Wh_phase_c)
-    else:
-        if(tarif_mode=="HP"):
-            current_consumed_energy_Wh["phase_c"]["HP"] += energy_house_consumption_Wh_phase_c
-        else:
-            current_consumed_energy_Wh["phase_c"]["HC"] += energy_house_consumption_Wh_phase_c
+    # Process real energy consumption
+    for phase, energy in zip(phases, [
+        energy_house_consumption_Wh_phase_a,
+        energy_house_consumption_Wh_phase_b,
+        energy_house_consumption_Wh_phase_c
+    ]):
+        update_energy(energy, tarif_mode, current_consumed_energy_Wh, current_injected_energy_Wh, phase)
 
-    if(simulated_energy_house_consumption_Wh_phase_a < 0):
-        if(tarif_mode=="HP"):
-            simulated_injected_energy_Wh["phase_a"]["HP"] += abs(simulated_energy_house_consumption_Wh_phase_a)
-        else:
-            simulated_injected_energy_Wh["phase_a"]["HC"] += abs(simulated_energy_house_consumption_Wh_phase_a)
-    else:
-        if(tarif_mode=="HP"):
-            simulated_consumed_energy_Wh["phase_a"]["HP"] += simulated_energy_house_consumption_Wh_phase_a
-        else:
-            simulated_consumed_energy_Wh["phase_a"]["HC"] += simulated_energy_house_consumption_Wh_phase_a
-    
-    if(simulated_energy_house_consumption_Wh_phase_b < 0):
-        if(tarif_mode=="HP"):
-            simulated_injected_energy_Wh["phase_b"]["HP"] += abs(simulated_energy_house_consumption_Wh_phase_b)
-        else:
-            simulated_injected_energy_Wh["phase_b"]["HC"] += abs(simulated_energy_house_consumption_Wh_phase_b)
-    else:
-        if(tarif_mode=="HP"):
-            simulated_consumed_energy_Wh["phase_b"]["HP"] += simulated_energy_house_consumption_Wh_phase_b
-        else:
-            simulated_consumed_energy_Wh["phase_b"]["HC"] += simulated_energy_house_consumption_Wh_phase_b
-
-    if(simulated_energy_house_consumption_Wh_phase_c < 0):
-        if(tarif_mode=="HP"):
-            simulated_injected_energy_Wh["phase_c"]["HP"] += abs(simulated_energy_house_consumption_Wh_phase_c)
-        else:
-            simulated_injected_energy_Wh["phase_c"]["HC"] += abs(simulated_energy_house_consumption_Wh_phase_c)
-    else:
-        if(tarif_mode=="HP"):
-            simulated_consumed_energy_Wh["phase_c"]["HP"] += simulated_energy_house_consumption_Wh_phase_c
-        else:
-            simulated_consumed_energy_Wh["phase_c"]["HC"] += simulated_energy_house_consumption_Wh_phase_c
+    # Process simulated energy consumption
+    for phase, energy in zip(phases, [
+        simulated_energy_house_consumption_Wh_phase_a,
+        simulated_energy_house_consumption_Wh_phase_b,
+        simulated_energy_house_consumption_Wh_phase_c
+    ]):
+        update_energy(energy, tarif_mode, simulated_consumed_energy_Wh, simulated_injected_energy_Wh, phase)
 
     #print("****************************************************************************************")
     #print(f"Timestamp: {timestamp}")
@@ -406,7 +367,7 @@ for i in range(len(merged_data)):
     #print(f"Tarif mode: {tarif_mode}")
 
 
-    # Sleep 0.5 seconds to simulate processing time
+    # DEBUG: Sleep X seconds to simulate processing time
     #time.sleep(0.01)
     
 print("****************************************************************************************")
@@ -433,6 +394,7 @@ data_consumed = [
 # Calculate totals for each column
 totals_injected = ["Total Injected", sum(row[1] for row in data_injected), sum(row[2] for row in data_injected), sum(row[3] for row in data_injected), sum(row[4] for row in data_injected)]
 totals_consumed = ["Total Consumed", sum(row[1] for row in data_consumed), sum(row[2] for row in data_consumed), sum(row[3] for row in data_consumed), sum(row[4] for row in data_consumed)]
+total_gain_CHF = totals_injected[4] + totals_consumed[4]
 
 headers = ["Phase", "Current (kWh)", "Simulated (kWh)", "Delta (kWh)", "Delta (CHF)"]
 
@@ -440,12 +402,15 @@ print("Injected Energy:")
 print(tabulate(data_injected + [totals_injected], headers, tablefmt="grid"))
 
 print("")
-
 print("Consumed Energy:")
 print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
 
 print("")
+print("Rentability:")
+print(f"+ Total gain: {total_gain_CHF} CHF for {number_of_data_days} days")
+print(f"+ Amortization time: {battery_cost / total_gain_CHF * number_of_data_days / 365:.2f} years")
 
+print("")
 print("Battery statistics:")
 print(f"- cycles: phase 1: {int(battery_cycle_total['phase1'])}, phase 2: {int(battery_cycle_total['phase2'])}, phase 3: {int(battery_cycle_total['phase3'])}")
 print(f"- expected life based on cycle: phase 1: {int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365)} years, phase 2: {int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365)} years, phase 3: {int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365)} years")
