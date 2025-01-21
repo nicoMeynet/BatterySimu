@@ -6,7 +6,7 @@ from tabulate import tabulate
 # ---- Battery parameters ----
 battery_capacity_Wh = [3940, 3940, 3940]        # Battery capacity per phase (Wh)
 max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)
-max_discharge_power_watts = [1800, 1800, 1800]  # Max discharge power per phase (W)
+max_discharge_power_watts = [1200, 1200, 1200]  # Max discharge power per phase (W)
 battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
 battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 5000                       # Battery lifespan in cycles
@@ -261,6 +261,12 @@ current_injected_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP": 0
 current_consumed_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP": 0, "HC": 0}, "phase_c": {"HP": 0, "HC": 0}}
 
 for i in range(len(merged_data)):
+    # Print progress bar
+    progress = (i + 1) / len(merged_data) * 100
+    sys.stdout.write(f"\r+ Progress: [{int(progress) * '#'}{(100 - int(progress)) * ' '}] {progress:.2f}%")
+    sys.stdout.flush()
+
+    # Get the current timestamp, weekday and hour
     timestamp = merged_data.iloc[i]["timestamp"]
     weekday = timestamp.weekday()
     hour = timestamp.hour
