@@ -69,22 +69,24 @@ def update_energy(energy, tarif_mode, consumed_dict, injected_dict, phase):
 
 # ---- Simulation ----
 def simulate_battery_behavior(house_grid_power_watts):
-    global energy_in_battery_Wh
+    global energy_in_battery_Wh 
 
     # Calculate production and consumption per phase
     new_house_grid_power_watts = [0, 0, 0]
     battery_status = [0, 0, 0]
     battery_cycle = [0, 0, 0]
+    charge_power_watts = [0, 0, 0]
+    discharge_power_watts = [0, 0, 0]
     for phase in range(3):
         if house_grid_power_watts[phase] < 0:
             # Inject into the grid, charge the battery with the surplus
             surplus_watts = abs(house_grid_power_watts[phase])
             if energy_in_battery_Wh[phase] < battery_capacity_Wh[phase]:
                 # Charge the battery if not full
-                charge_power_watts = min(surplus_watts, max_charge_power_watts[phase])
-                energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts, 1) * battery_charge_efficiency
+                charge_power_watts[phase] = min(surplus_watts, max_charge_power_watts[phase])
+                energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts[phase], 1) * battery_charge_efficiency
                 energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
-                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_injected_in_battery_Wh / battery_capacity_Wh[phase] / 2)
                 battery_status[phase] = "charging"
             else:
@@ -94,12 +96,12 @@ def simulate_battery_behavior(house_grid_power_watts):
         else:
             # Consume from the grid, discharge the battery to compensate
             deficit_watts = house_grid_power_watts[phase]
-            discharge_power_watts = min(deficit_watts, max_discharge_power_watts[phase])
+            discharge_power_watts[phase] = min(deficit_watts, max_discharge_power_watts[phase])
             if energy_in_battery_Wh[phase] > 0:
                 # Discharge the battery if not empty
-                energy_to_be_consumed_from_battery_Wh = calculate_energy_Wh(discharge_power_watts, 1) * (1 / battery_discharge_efficiency)
+                energy_to_be_consumed_from_battery_Wh = calculate_energy_Wh(discharge_power_watts[phase], 1) * (1 / battery_discharge_efficiency)
                 energy_in_battery_Wh[phase] -= energy_to_be_consumed_from_battery_Wh
-                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_consumed_from_battery_Wh / battery_capacity_Wh[phase] / 2)
                 battery_status[phase] = "discharging"
             else:
@@ -112,19 +114,25 @@ def simulate_battery_behavior(house_grid_power_watts):
             "new_house_grid_power_watts": new_house_grid_power_watts[0],
             "energy_in_battery_Wh": energy_in_battery_Wh[0],
             "battery_status": battery_status[0],
-            "battery_cycle": battery_cycle[0]
+            "battery_cycle": battery_cycle[0],
+            "charge_power_watts": charge_power_watts[0],
+            "discharge_power_watts": discharge_power_watts[0]
         },
         "phase2": {
             "new_house_grid_power_watts": new_house_grid_power_watts[1],
             "energy_in_battery_Wh": energy_in_battery_Wh[1],
             "battery_status": battery_status[1],
-            "battery_cycle": battery_cycle[1]
+            "battery_cycle": battery_cycle[1],
+            "charge_power_watts": charge_power_watts[1],
+            "discharge_power_watts": discharge_power_watts[1]
         },
         "phase3": {
             "new_house_grid_power_watts": new_house_grid_power_watts[2],
             "energy_in_battery_Wh": energy_in_battery_Wh[2],
             "battery_status": battery_status[2],
-            "battery_cycle": battery_cycle[2]
+            "battery_cycle": battery_cycle[2],
+            "charge_power_watts": charge_power_watts[2],
+            "discharge_power_watts": discharge_power_watts
         }
     }
 
@@ -282,17 +290,17 @@ for i in range(len(merged_data)):
     energy_house_consumption_Wh_phase_c=calculate_energy_Wh(house_consumption_watts[2],1)
 
     # Simulation with the battery
-    result = simulate_battery_behavior(house_consumption_watts)
+    sim_result = simulate_battery_behavior(house_consumption_watts)
 
     # - House consumption
-    simulated_energy_house_consumption_Wh_phase_a=calculate_energy_Wh(result["phase1"]["new_house_grid_power_watts"],1)
-    simulated_energy_house_consumption_Wh_phase_b=calculate_energy_Wh(result["phase2"]["new_house_grid_power_watts"],1)
-    simulated_energy_house_consumption_Wh_phase_c=calculate_energy_Wh(result["phase3"]["new_house_grid_power_watts"],1)
+    simulated_energy_house_consumption_Wh_phase_a=calculate_energy_Wh(sim_result["phase1"]["new_house_grid_power_watts"],1)
+    simulated_energy_house_consumption_Wh_phase_b=calculate_energy_Wh(sim_result["phase2"]["new_house_grid_power_watts"],1)
+    simulated_energy_house_consumption_Wh_phase_c=calculate_energy_Wh(sim_result["phase3"]["new_house_grid_power_watts"],1)
    
     # - Battery energy
-    battery_cycle_total["phase1"] += result["phase1"]["battery_cycle"]
-    battery_cycle_total["phase2"] += result["phase2"]["battery_cycle"]
-    battery_cycle_total["phase3"] += result["phase3"]["battery_cycle"]
+    battery_cycle_total["phase1"] += sim_result["phase1"]["battery_cycle"]
+    battery_cycle_total["phase2"] += sim_result["phase2"]["battery_cycle"]
+    battery_cycle_total["phase3"] += sim_result["phase3"]["battery_cycle"]
 
     # List of phases and tariff modes
     phases = ["phase_a", "phase_b", "phase_c"]
@@ -313,6 +321,30 @@ for i in range(len(merged_data)):
         simulated_energy_house_consumption_Wh_phase_c
     ]):
         update_energy(energy, tarif_mode, simulated_consumed_energy_Wh, simulated_injected_energy_Wh, phase)
+
+    # Export all info in a csv file
+    results.append({
+        "timestamp": timestamp,
+        "tarif_mode": tarif_mode,
+        "house_consumption_phase_a_Wh": energy_house_consumption_Wh_phase_a,
+        "house_consumption_phase_b_Wh": energy_house_consumption_Wh_phase_b,
+        "house_consumption_phase_c_Wh": energy_house_consumption_Wh_phase_c,
+        "simulated_house_consumption_phase_a_Wh": simulated_energy_house_consumption_Wh_phase_a,
+        "simulated_house_consumption_phase_b_Wh": simulated_energy_house_consumption_Wh_phase_b,
+        "simulated_house_consumption_phase_c_Wh": simulated_energy_house_consumption_Wh_phase_c,
+        "battery_energy_phase1_Wh": sim_result["phase1"]["energy_in_battery_Wh"],
+        "battery_energy_phase2_Wh": sim_result["phase2"]["energy_in_battery_Wh"],
+        "battery_energy_phase3_Wh": sim_result["phase3"]["energy_in_battery_Wh"],
+        "battery_status_phase1": sim_result["phase1"]["battery_status"],
+        "battery_status_phase2": sim_result["phase2"]["battery_status"],
+        "battery_status_phase3": sim_result["phase3"]["battery_status"],
+        "charge_power_phase1_W": sim_result["phase1"]["charge_power_watts"],
+        "charge_power_phase2_W": sim_result["phase2"]["charge_power_watts"],
+        "charge_power_phase3_W": sim_result["phase3"]["charge_power_watts"],
+        "discharge_power_phase1_W": sim_result["phase1"]["discharge_power_watts"],
+        "discharge_power_phase2_W": sim_result["phase2"]["discharge_power_watts"],
+        "discharge_power_phase3_W": sim_result["phase3"]["discharge_power_watts"]
+    })
 
     #print("****************************************************************************************")
     #print(f"Timestamp: {timestamp}")
@@ -337,7 +369,12 @@ for i in range(len(merged_data)):
 
     # DEBUG: Sleep X seconds to simulate processing time
     #time.sleep(0.01)
-    
+
+# Convert results to DataFrame and export to CSV
+results_df = pd.DataFrame(results)
+#results_df.to_csv("simulation_results.csv", index=False)
+#print("\n+ Successfully exported simulation results to simulation_results.csv")
+
 print("****************************************************************************************")
 # Data for injected energy
 data_injected = [
@@ -379,8 +416,74 @@ print(f"+ Total gain: {total_gain_CHF} CHF for {number_of_data_days} days or per
 print(f"+ Amortization time: {battery_cost / total_gain_CHF * number_of_data_days / 365:.2f} years if the cost of the battery is {battery_cost} CHF")
 
 print("")
-print("Battery statistics:")
-print(f"+ Max cycles: {battery_max_cycles} (config)")
-print(f"+ Cycles: phase 1: {int(battery_cycle_total['phase1'])}, phase 2: {int(battery_cycle_total['phase2'])}, phase 3: {int(battery_cycle_total['phase3'])}")
-print(f"+ Expected life based on cycles: phase 1: {int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365)} years, phase 2: {int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365)} years, phase 3: {int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365)} years")
-print(f"+ Remaining Energy: phase 1: {int(energy_in_battery_Wh[0])} Wh, phase 2: {int(energy_in_battery_Wh[1])} Wh, phase 3: {int(energy_in_battery_Wh[2])} Wh")
+# Battery statistics
+battery_stats_data = [
+    ["Cycles", int(battery_cycle_total['phase1']), int(battery_cycle_total['phase2']), int(battery_cycle_total['phase3']), battery_max_cycles],
+    ["Expected life (years)", int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365), int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365), int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365), ""],
+    ["Remaining energy (Wh)", int(energy_in_battery_Wh[0]), int(energy_in_battery_Wh[1]), int(energy_in_battery_Wh[2]), ""]
+]
+
+headers = ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"]
+
+print("Battery Statistics:")
+print(tabulate(battery_stats_data, headers, tablefmt="grid"))
+
+
+# Calculate the number of entries in results with battery status "full" or "empty"
+battery_status_full_phase1 = results_df[results_df["battery_status_phase1"] == "full"].shape[0]
+battery_status_full_phase2 = results_df[results_df["battery_status_phase2"] == "full"].shape[0]
+battery_status_full_phase3 = results_df[results_df["battery_status_phase3"] == "full"].shape[0]
+battery_status_empty_phase1 = results_df[results_df["battery_status_phase1"] == "empty"].shape[0]
+battery_status_empty_phase2 = results_df[results_df["battery_status_phase2"] == "empty"].shape[0]
+battery_status_empty_phase3 = results_df[results_df["battery_status_phase3"] == "empty"].shape[0]
+battery_status_discharging_phase1 = results_df[results_df["battery_status_phase1"] == "discharging"].shape[0]
+battery_status_discharging_phase2 = results_df[results_df["battery_status_phase2"] == "discharging"].shape[0]
+battery_status_discharging_phase3 = results_df[results_df["battery_status_phase3"] == "discharging"].shape[0]
+battery_status_charging_phase1 = results_df[results_df["battery_status_phase1"] == "charging"].shape[0]
+battery_status_charging_phase2 = results_df[results_df["battery_status_phase2"] == "charging"].shape[0]
+battery_status_charging_phase3 = results_df[results_df["battery_status_phase3"] == "charging"].shape[0]
+battery_status_phase1_total = battery_status_full_phase1 + battery_status_empty_phase1 + battery_status_discharging_phase1 + battery_status_charging_phase1
+battery_status_phase2_total = battery_status_full_phase2 + battery_status_empty_phase2 + battery_status_discharging_phase2 + battery_status_charging_phase2
+battery_status_phase3_total = battery_status_full_phase3 + battery_status_empty_phase3 + battery_status_discharging_phase3 + battery_status_charging_phase3
+
+# Create a table for battery status with value and percentage
+battery_status_data = [
+    ["Full", f"{battery_status_full_phase1} ({battery_status_full_phase1 / battery_status_phase1_total * 100:.2f}%)", f"{battery_status_full_phase2} ({battery_status_full_phase2 / battery_status_phase2_total * 100:.2f}%)", f"{battery_status_full_phase3} ({battery_status_full_phase3 / battery_status_phase3_total * 100:.2f}%)"],
+    ["Empty", f"{battery_status_empty_phase1} ({battery_status_empty_phase1 / battery_status_phase1_total * 100:.2f}%)", f"{battery_status_empty_phase2} ({battery_status_empty_phase2 / battery_status_phase2_total * 100:.2f}%)", f"{battery_status_empty_phase3} ({battery_status_empty_phase3 / battery_status_phase3_total * 100:.2f}%)"],
+    ["Discharging", f"{battery_status_discharging_phase1} ({battery_status_discharging_phase1 / battery_status_phase1_total * 100:.2f}%)", f"{battery_status_discharging_phase2} ({battery_status_discharging_phase2 / battery_status_phase2_total * 100:.2f}%)", f"{battery_status_discharging_phase3} ({battery_status_discharging_phase3 / battery_status_phase3_total * 100:.2f}%)"],
+    ["Charging", f"{battery_status_charging_phase1} ({battery_status_charging_phase1 / battery_status_phase1_total * 100:.2f}%)", f"{battery_status_charging_phase2} ({battery_status_charging_phase2 / battery_status_phase2_total * 100:.2f}%)", f"{battery_status_charging_phase3} ({battery_status_charging_phase3 / battery_status_phase3_total * 100:.2f}%)"],
+    ["Total", battery_status_phase1_total, battery_status_phase2_total, battery_status_phase3_total]
+]
+
+headers = ["Status", "Phase 1", "Phase 2", "Phase 3"]
+
+print("")
+print("Battery Status:")
+print(tabulate(battery_status_data, headers, tablefmt="grid"))
+
+# Statistics for charing power and discharging power when at the peak
+battery_charging_max_power_phase1 = results_df[results_df["charge_power_phase1_W"] == max_charge_power_watts[0]].shape[0]
+battery_charging_max_power_phase2 = results_df[results_df["charge_power_phase2_W"] == max_charge_power_watts[1]].shape[0]
+battery_charging_max_power_phase3 = results_df[results_df["charge_power_phase3_W"] == max_charge_power_watts[2]].shape[0]
+battery_discharging_max_power_phase1 = results_df[results_df["discharge_power_phase1_W"] == max_discharge_power_watts[0]].shape[0]
+battery_discharging_max_power_phase2 = results_df[results_df["discharge_power_phase2_W"] == max_discharge_power_watts[1]].shape[0]
+battery_discharging_max_power_phase3 = results_df[results_df["discharge_power_phase3_W"] == max_discharge_power_watts[2]].shape[0]
+battery_charging_not_max_power_phase1 = results_df[(results_df["charge_power_phase1_W"] != max_charge_power_watts[0]) & (results_df["charge_power_phase1_W"] != 0)].shape[0]
+battery_charging_not_max_power_phase2 = results_df[(results_df["charge_power_phase2_W"] != max_charge_power_watts[1]) & (results_df["charge_power_phase2_W"] != 0)].shape[0]
+battery_charging_not_max_power_phase3 = results_df[(results_df["charge_power_phase3_W"] != max_charge_power_watts[2]) & (results_df["charge_power_phase3_W"] != 0)].shape[0]
+battery_discharging_not_max_power_phase1 = results_df[(results_df["discharge_power_phase1_W"] != max_discharge_power_watts[0]) & (results_df["discharge_power_phase1_W"] != 0)].shape[0]
+battery_discharging_not_max_power_phase2 = results_df[(results_df["discharge_power_phase2_W"] != max_discharge_power_watts[1]) & (results_df["discharge_power_phase2_W"] != 0)].shape[0]
+battery_discharging_not_max_power_phase3 = results_df[(results_df["discharge_power_phase3_W"] != max_discharge_power_watts[2]) & (results_df["discharge_power_phase3_W"] != 0)].shape[0]
+
+# Create a table for charging and discharging power at the peak
+charging_discharging_power_data = [
+    ["Charging at Max Power", f"{battery_charging_max_power_phase1} ({battery_charging_max_power_phase1 / (battery_charging_max_power_phase1 + battery_charging_not_max_power_phase1) * 100:.2f}%)", f"{battery_charging_max_power_phase2} ({battery_charging_max_power_phase2 / (battery_charging_max_power_phase2 + battery_charging_not_max_power_phase2) * 100:.2f}%)", f"{battery_charging_max_power_phase3} ({battery_charging_max_power_phase3 / (battery_charging_max_power_phase3 + battery_charging_not_max_power_phase3) * 100:.2f}%)"],
+    ["Charging Not at Max Power", f"{battery_charging_not_max_power_phase1} ({battery_charging_not_max_power_phase1 / (battery_charging_max_power_phase1 + battery_charging_not_max_power_phase1) * 100:.2f}%)", f"{battery_charging_not_max_power_phase2} ({battery_charging_not_max_power_phase2 / (battery_charging_max_power_phase2 + battery_charging_not_max_power_phase2) * 100:.2f}%)", f"{battery_charging_not_max_power_phase3} ({battery_charging_not_max_power_phase3 / (battery_charging_max_power_phase3 + battery_charging_not_max_power_phase3) * 100:.2f}%)"],
+    ["Discharging at Max Power", f"{battery_discharging_max_power_phase1} ({battery_discharging_max_power_phase1 / (battery_discharging_max_power_phase1 + battery_discharging_not_max_power_phase1) * 100:.2f}%)", f"{battery_discharging_max_power_phase2} ({battery_discharging_max_power_phase2 / (battery_discharging_max_power_phase2 + battery_discharging_not_max_power_phase2) * 100:.2f}%)", f"{battery_discharging_max_power_phase3} ({battery_discharging_max_power_phase3 / (battery_discharging_max_power_phase3 + battery_discharging_not_max_power_phase3) * 100:.2f}%)"],
+    ["Discharging Not at Max Power", f"{battery_discharging_not_max_power_phase1} ({battery_discharging_not_max_power_phase1 / (battery_discharging_max_power_phase1 + battery_discharging_not_max_power_phase1) * 100:.2f}%)", f"{battery_discharging_not_max_power_phase2} ({battery_discharging_not_max_power_phase2 / (battery_discharging_max_power_phase2 + battery_discharging_not_max_power_phase2) * 100:.2f}%)", f"{battery_discharging_not_max_power_phase3} ({battery_discharging_not_max_power_phase3 / (battery_discharging_max_power_phase3 + battery_discharging_not_max_power_phase3) * 100:.2f}%)"]
+]
+headers = ["Metric", "Phase 1", "Phase 2", "Phase 3"]
+
+print("")
+print("Charging and Discharging Power at Peak:")
+print(tabulate(charging_discharging_power_data, headers, tablefmt="grid"))

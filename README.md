@@ -71,58 +71,61 @@ The script performs the following preprocessing steps:
 
 ### Example Output for 337 days
 #### Injected Energy
-```plaintext
-Injected Energy:
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase                     |   Current (kWh) |   Simulated (kWh) |   Delta (kWh) |   Delta (CHF) |
-+===========================+=================+===================+===============+===============+
-| Phase A Injected Off-Peak |            1782 |               843 |          -939 |            93 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase A Injected Peak     |               0 |                 0 |             0 |             0 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase B Injected Off-Peak |            2169 |              1315 |          -854 |            85 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase B Injected Peak     |               0 |                 0 |             0 |             0 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase C Injected Off-Peak |            2374 |              1620 |          -753 |            75 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase C Injected Peak     |               3 |                 3 |             0 |             0 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Total Injected            |            6328 |              3781 |         -2546 |           253 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-```
+
+| Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
+|---------------------------|---------------|-----------------|-------------|-------------|
+| Phase A Injected Off-Peak | 50            | 12              | -37         | 3           |
+| Phase A Injected Peak     | 0             | 0               | 0           | 0           |
+| Phase B Injected Off-Peak | 57            | 17              | -40         | 4           |
+| Phase B Injected Peak     | 0             | 0               | 0           | 0           |
+| Phase C Injected Off-Peak | 59            | 17              | -41         | 4           |
+| Phase C Injected Peak     | 0             | 0               | 0           | 0           |
+| **Total Injected**        | **166**       | **46**          | **-118**    | **11**      |
 
 #### Consumed Energy
-```plaintext
-Consumed Energy:
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase                     |   Current (kWh) |   Simulated (kWh) |   Delta (kWh) |   Delta (CHF) |
-+===========================+=================+===================+===============+===============+
-| Phase A Consumed Off-Peak |            1424 |               953 |          -471 |           160 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase A Consumed Peak     |             495 |               202 |          -293 |            99 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase B Consumed Off-Peak |             891 |               449 |          -441 |           150 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase B Consumed Peak     |             363 |               111 |          -251 |            85 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase C Consumed Off-Peak |             708 |               303 |          -404 |           137 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Phase C Consumed Peak     |             299 |                89 |          -209 |            71 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-| Total Consumed            |            4180 |              2107 |         -2069 |           702 |
-+---------------------------+-----------------+-------------------+---------------+---------------+
-```
+
+| Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
+|---------------------------|---------------|-----------------|-------------|-------------|
+| Phase A Consumed Off-Peak | 108           | 85              | -22         | 7           |
+| Phase A Consumed Peak     | 37            | 28              | -9          | 3           |
+| Phase B Consumed Off-Peak | 79            | 57              | -21         | 7           |
+| Phase B Consumed Peak     | 38            | 24              | -14         | 4           |
+| Phase C Consumed Off-Peak | 73            | 51              | -21         | 7           |
+| Phase C Consumed Peak     | 37            | 24              | -13         | 4           |
+| **Total Consumed**        | **372**       | **269**         | **-100**    | **32**      |
 
 #### Rentability
-- **Total gain**: 955 CHF for 337 days or per year: 1034 CHF (extrapolated)
-- **Amortization time**: 5.80 years if the cost of the battery is 6000 CHF
+
+- **Total gain:** 43 CHF for 15 days or per year: 1046 CHF (extrapolated)
+- **Amortization time:** 5.59 years if the cost of the battery is 5847 CHF
 
 #### Battery Statistics
-- **Max cycles**: 5000 (config)
-- **Cycles**: phase 1: 215, phase 2: 195, phase 3: 172
-- **Expected life based on cycles**: phase 1: 21 years, phase 2: 23 years, phase 3: 26 years
-- **Remaining Energy**: phase 1: -2 Wh, phase 2: 2870 Wh, phase 3: 0 Wh
+
+| Metric                | Phase 1 | Phase 2 | Phase 3 | Max/Config |
+|-----------------------|---------|---------|---------|------------|
+| Cycles                | 8       | 9       | 9       | 6000       |
+| Expected life (years) | 27      | 25      | 25      |            |
+| Remaining energy (Wh) | 2287    | -17     | 1945    |            |
+
+#### Battery Status
+
+| Status      | Phase 1    | Phase 2    | Phase 3    |
+|-------------|------------|------------|------------|
+| Full        | 507 (2.20%)| 737 (3.20%)| 662 (2.88%)|
+| Empty       | 11785 (51.22%)| 10355 (45.00%)| 9815 (42.66%)|
+| Discharging | 6994 (30.40%)| 7851 (34.12%)| 8425 (36.61%)|
+| Charging    | 3724 (16.18%)| 4067 (17.67%)| 4108 (17.85%)|
+| **Total**   | **23010**  | **23010**  | **23010**  |
+
+#### Charging and Discharging Power at Peak
+
+| Metric                       | Phase 1        | Phase 2        | Phase 3        |
+|------------------------------|----------------|----------------|----------------|
+| Charging at Max Power        | 1014 (27.23%)  | 991 (24.37%)   | 1067 (25.97%)  |
+| Charging Not at Max Power    | 2710 (72.77%)  | 3076 (75.63%)  | 3041 (74.03%)  |
+| Discharging at Max Power     | 1402 (7.47%)   | 1035 (5.69%)   | 0 (0.00%)      |
+| Discharging Not at Max Power | 17360 (92.53%) | 17146 (94.31%) | 23010 (100.00%)|
+
 
 ## Configuration
 The following parameters can be configured in the script:
