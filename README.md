@@ -115,7 +115,7 @@ Consumed Energy:
 ```
 
 #### Rentability
-- **Total gain**: 955 CHF for 337 days
+- **Total gain**: 955 CHF for 337 days or per year: 1034 CHF (extrapolated)
 - **Amortization time**: 5.80 years if the cost of the battery is 6000 CHF
 
 #### Battery Statistics

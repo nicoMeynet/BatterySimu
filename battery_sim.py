@@ -369,7 +369,7 @@ print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
 
 print("")
 print("Rentability:")
-print(f"+ Total gain: {total_gain_CHF} CHF for {number_of_data_days} days")
+print(f"+ Total gain: {total_gain_CHF} CHF for {number_of_data_days} days or per year: {total_gain_CHF / number_of_data_days * 365:.0f} CHF (extrapolated)")
 print(f"+ Amortization time: {battery_cost / total_gain_CHF * number_of_data_days / 365:.2f} years if the cost of the battery is {battery_cost} CHF")
 
 print("")
