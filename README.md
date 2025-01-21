@@ -118,19 +118,13 @@ Consumed Energy:
 ```
 
 #### Rentability
-- **Total gain**: 43 CHF for 15 days
-- **Amortization time**: 5 years
+- **Total gain**: 955 CHF for 337 days
+- **Amortization time**: 5.80 years
 
 #### Battery Statistics
-- **Cycles**: Phase 1: 8, Phase 2: 9, Phase 3: 9
-- **Expected Life**:
-  - Phase 1: 23 years
-  - Phase 2: 20 years
-  - Phase 3: 20 years
-- **Remaining Energy**:
-  - Phase 1: 2284 Wh
-  - Phase 2: -3 Wh
-  - Phase 3: 1674 Wh
+- **Cycles**: phase 1: 215, phase 2: 195, phase 3: 172
+- **Expected life based on cycles**: phase 1: 21 years, phase 2: 23 years, phase 3: 26 years
+- **Remaining Energy**: phase 1: -2 Wh, phase 2: 2870 Wh, phase 3: 0 Wh
 
 ## Configuration
 The following parameters can be configured in the script:
