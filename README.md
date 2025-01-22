@@ -87,6 +87,8 @@ The script performs the following preprocessing steps:
 
 ### Example Output with a dataset of 337 days
 #### Injected Energy
+The table below shows the energy injected into the grid.
+Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid.
 
 | Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
 |---------------------------|---------------|-----------------|-------------|-------------|
@@ -99,6 +101,8 @@ The script performs the following preprocessing steps:
 | **Total Injected**        | **6328**      | **3783**        | **-2545**   | **253**     |
 
 #### Consumed Energy
+The table below shows the energy consumed from the grid.
+Adding a battery is expected to reduce the amount of energy consumed from the grid.
 
 | Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
 |---------------------------|---------------|-----------------|-------------|-------------|
@@ -116,7 +120,8 @@ The script performs the following preprocessing steps:
 - **Amortization time:** 5.66 years if the cost of the battery is 5847 CHF
 
 #### Battery Statistics
-
+This is the statistics for the battery indicating the number of cycles, the expected life, and the remaining energy.
+If the cycles between the phases are different, it means that the battery is not used equally.
 | Metric                | Phase 1 | Phase 2 | Phase 3 | Max/Config |
 |-----------------------|---------|---------|---------|------------|
 | Cycles                | 215     | 195     | 172     | 6000       |
@@ -155,7 +160,7 @@ The following parameters can be configured in the script:
 - `battery_cost`: Total cost of the battery (CHF).
 
 #### Example Configuration
-Below is an example of configuring the script for a 10 kWh battery system:
+Below is an example of configuring the script for a 12 kWh battery system over 3 phases:
 ```python
 battery_capacity_Wh = [3940, 3940, 3940]        # Battery capacity per phase (Wh)
 max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)

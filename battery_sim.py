@@ -361,16 +361,16 @@ for i in range(len(merged_data)):
 results_df = pd.DataFrame(results)
 #results_df.to_csv("simulation_results.csv", index=False)
 #print("\n+ Successfully exported simulation results to simulation_results.csv")
-
+print("\n+ Successfully simulated battery behavior")
 print("****************************************************************************************")
 # Data for injected energy
 data_injected = [
-    ["Phase A Injected Off-Peak", int(current_injected_energy_Wh['phase_a']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_a']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000)],
-    ["Phase A Injected Peak", int(current_injected_energy_Wh['phase_a']['HP'] / 1000), int(simulated_injected_energy_Wh['phase_a']['HP'] / 1000), int((simulated_injected_energy_Wh['phase_a']['HP'] - current_injected_energy_Wh['phase_a']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['phase_a']['HP'] - current_injected_energy_Wh['phase_a']['HP']) / 1000)],
-    ["Phase B Injected Off-Peak", int(current_injected_energy_Wh['phase_b']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_b']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_b']['HC'] - current_injected_energy_Wh['phase_b']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_b']['HC'] - current_injected_energy_Wh['phase_b']['HC']) / 1000)],
-    ["Phase B Injected Peak", int(current_injected_energy_Wh['phase_b']['HP'] / 1000), int(simulated_injected_energy_Wh['phase_b']['HP'] / 1000), int((simulated_injected_energy_Wh['phase_b']['HP'] - current_injected_energy_Wh['phase_b']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['phase_b']['HP'] - current_injected_energy_Wh['phase_b']['HP']) / 1000)],
-    ["Phase C Injected Off-Peak", int(current_injected_energy_Wh['phase_c']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_c']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_c']['HC'] - current_injected_energy_Wh['phase_c']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_c']['HC'] - current_injected_energy_Wh['phase_c']['HC']) / 1000)],
-    ["Phase C Injected Peak", int(current_injected_energy_Wh['phase_c']['HP'] / 1000), int(simulated_injected_energy_Wh['phase_c']['HP'] / 1000), int((simulated_injected_energy_Wh['phase_c']['HP'] - current_injected_energy_Wh['phase_c']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['phase_c']['HP'] - current_injected_energy_Wh['phase_c']['HP']) / 1000)]
+    ["Phase A Injected Off-Peak", int(current_injected_energy_Wh['phase_a']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_a']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000 * (-1))],
+    ["Phase A Injected Peak", int(current_injected_energy_Wh['phase_a']['HP'] / 1000), int(simulated_injected_energy_Wh['phase_a']['HP'] / 1000), int((simulated_injected_energy_Wh['phase_a']['HP'] - current_injected_energy_Wh['phase_a']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['phase_a']['HP'] - current_injected_energy_Wh['phase_a']['HP']) / 1000 * (-1))],
+    ["Phase B Injected Off-Peak", int(current_injected_energy_Wh['phase_b']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_b']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_b']['HC'] - current_injected_energy_Wh['phase_b']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_b']['HC'] - current_injected_energy_Wh['phase_b']['HC']) / 1000 * (-1))],
+    ["Phase B Injected Peak", int(current_injected_energy_Wh['phase_b']['HP'] / 1000), int(simulated_injected_energy_Wh['phase_b']['HP'] / 1000), int((simulated_injected_energy_Wh['phase_b']['HP'] - current_injected_energy_Wh['phase_b']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['phase_b']['HP'] - current_injected_energy_Wh['phase_b']['HP']) / 1000 * (-1))],
+    ["Phase C Injected Off-Peak", int(current_injected_energy_Wh['phase_c']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_c']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_c']['HC'] - current_injected_energy_Wh['phase_c']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_c']['HC'] - current_injected_energy_Wh['phase_c']['HC']) / 1000 * (-1))],
+    ["Phase C Injected Peak", int(current_injected_energy_Wh['phase_c']['HP'] / 1000), int(simulated_injected_energy_Wh['phase_c']['HP'] / 1000), int((simulated_injected_energy_Wh['phase_c']['HP'] - current_injected_energy_Wh['phase_c']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['phase_c']['HP'] - current_injected_energy_Wh['phase_c']['HP']) / 1000 * (-1))]
 ]
 
 # Data for consumed energy
@@ -388,13 +388,17 @@ totals_injected = ["Total Injected", sum(row[1] for row in data_injected), sum(r
 totals_consumed = ["Total Consumed", sum(row[1] for row in data_consumed), sum(row[2] for row in data_consumed), sum(row[3] for row in data_consumed), sum(row[4] for row in data_consumed)]
 total_gain_CHF = totals_injected[4] + totals_consumed[4]
 
-headers = ["Phase", "Current (kWh)", "Simulated (kWh)", "Delta (kWh)", "Delta (CHF)"]
+headers = ["Phase", "Without Battery (kWh)", "With Battery (kWh)", "Delta (kWh)", "Delta (CHF)"]
 
 print("Injected Energy:")
+print("The table below shows the energy injected into the grid.") 
+print("Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid.")
 print(tabulate(data_injected + [totals_injected], headers, tablefmt="grid"))
 
 print("")
 print("Consumed Energy:")
+print("The table below shows the energy consumed from the grid.")
+print("Adding a battery is expected to reduce the amount of energy consumed from the grid.")
 print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
 
 print("")
@@ -413,6 +417,8 @@ battery_stats_data = [
 headers = ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"]
 
 print("Battery Statistics:")
+print("This is the statistics for the battery indicating the number of cycles, the expected life, and the remaining energy.")
+print("If the cycles between the phases are different, it means that the battery is not used equally.")
 print(tabulate(battery_stats_data, headers, tablefmt="grid"))
 
 
