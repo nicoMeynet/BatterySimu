@@ -92,13 +92,13 @@ Adding a battery will reduce the amount of energy injected into the grid, as sur
 
 | Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
 |---------------------------|---------------|-----------------|-------------|-------------|
-| Phase A Injected Off-Peak | 1782          | 843             | -939        | 93          |
+| Phase A Injected Off-Peak | 1782          | 843             | -939        | -93          |
 | Phase A Injected Peak     | 0             | 0               | 0           | 0           |
-| Phase B Injected Off-Peak | 2169          | 1315            | -854        | 85          |
+| Phase B Injected Off-Peak | 2169          | 1315            | -854        | -85          |
 | Phase B Injected Peak     | 0             | 0               | 0           | 0           |
-| Phase C Injected Off-Peak | 2374          | 1622            | -752        | 75          |
+| Phase C Injected Off-Peak | 2374          | 1622            | -752        | -75          |
 | Phase C Injected Peak     | 3             | 3               | 0           | 0           |
-| **Total Injected**        | **6328**      | **3783**        | **-2545**   | **253**     |
+| **Total Injected**        | **6328**      | **3783**        | **-2545**   | **-253**     |
 
 #### Consumed Energy
 The table below shows the energy consumed from the grid.
@@ -116,8 +116,8 @@ Adding a battery is expected to reduce the amount of energy consumed from the gr
 
 #### Rentability
 
-- **Total gain:** 953 CHF for 337 days or per year: 1032 CHF (extrapolated)
-- **Amortization time:** 5.66 years if the cost of the battery is 5847 CHF
+- **Total gain:** 447 CHF for 337 days or per year: 484 CHF (extrapolated)
+- **Amortization time:** 12.08 years if the cost of the battery is 5847 CHF
 
 #### Battery Statistics
 This is the statistics for the battery indicating the number of cycles, the expected life, and the remaining energy.
