@@ -9,11 +9,11 @@ Key benefits include:
 - **Operational:** Easily integrates with Home Assistant CSV data for seamless modeling.
 
 ### Why Plug-and-Play Batteries?
-In recent years, plug-and-play battery systems have surged in popularity due to their ease of installation—no electrician required. Technological advancements and decreasing costs have made these systems more accessible for residential use. However, understanding their economic feasibility remains challenging.
+Early this year, plug-and-play battery systems have surged in popularity due to their ease of installation—no electrician required. Technological advancements and decreasing costs have made these systems more accessible for residential use. However, understanding their economic feasibility remains challenging.
 
 #### Examples of plug-and-play batteries:
-- **Zendure Hyper 2000:** Known for its portability and user-friendly setup.
-- **Sunology Storey:** Offers scalability and efficient energy storage for small households.
+- Zendure Hyper 2000
+- Sunology Storey
 
 The Battery Simulator aims to simplify this evaluation process by analyzing the potential savings, operational impact, and optimal configuration of these systems.
 
@@ -48,13 +48,14 @@ pip install pandas tabulate
 ## Usage
 Run the script with the following command:
 ```bash
-python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>
+python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>  [--export-csv]
 ```
 
 ### Arguments
 - `<house_phase_a.csv>`: CSV file containing energy consumption data for Phase A.
 - `<house_phase_b.csv>`: CSV file containing energy consumption data for Phase B.
 - `<house_phase_c.csv>`: CSV file containing energy consumption data for Phase C.
+- `--export-csv`: optional parameter to enable a csv export of the data
 
 ### Example
 ```bash
@@ -74,7 +75,7 @@ Each input CSV file should have the following structure:
 
 ### Preprocessing
 The script performs the following preprocessing steps:
-- Cleans and renames columns.
+- Clean dataset.
 - Groups data by timestamp.
 - Fills missing timestamps with interpolated values.
 
@@ -83,7 +84,7 @@ The script performs the following preprocessing steps:
    - Energy injected and consumed during peak (HP) and off-peak (HC) hours.
    - Delta values for energy usage and associated cost differences.
    - Rentability of the battery
-   - Battery lifecycle statistics.
+   - Battery lifecycle, charging/discharging statistics.
 
 ### Example Output with a dataset of 337 days
 #### Injected Energy
@@ -122,6 +123,7 @@ Adding a battery is expected to reduce the amount of energy consumed from the gr
 #### Battery Statistics
 This is the statistics for the battery indicating the number of cycles, the expected life, and the remaining energy.
 If the cycles between the phases are different, it means that the battery is not used equally.
+
 | Metric                | Phase 1 | Phase 2 | Phase 3 | Max/Config |
 |-----------------------|---------|---------|---------|------------|
 | Cycles                | 215     | 195     | 172     | 6000       |
@@ -129,6 +131,9 @@ If the cycles between the phases are different, it means that the battery is not
 | Remaining energy (Wh) | 0       | 2870    | -2      |            |
 
 #### Battery Status
+This table illustrates the time the battery spends in each status.
+A battery that is fully charged too often may indicate that it is undersized, whereas a battery that is frequently empty may suggest that it is oversized.
+The distribution of charging and discharging can provide insights into whether the battery is used frequently or infrequently. If the discharging percentage exceeds the charging percentage, it indicates that the battery is frequently utilized to reduce grid consumption.
 
 | Status      | Phase 1         | Phase 2         | Phase 3         |
 |-------------|-----------------|-----------------|-----------------|
@@ -139,6 +144,8 @@ If the cycles between the phases are different, it means that the battery is not
 | **Total**   | **486019**      | **486019**      | **486019**      |
 
 #### Charging and Discharging Power at Peak
+The batteries are designed to charge and discharge at a specific maximum power level.
+Frequent charging at maximum power may suggest the need for a more powerful system or an additional battery connected in parallel. The same consideration applies to discharging.
 
 | Metric                       | Phase 1         | Phase 2         | Phase 3          |
 |------------------------------|-----------------|-----------------|------------------|

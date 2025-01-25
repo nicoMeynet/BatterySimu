@@ -147,11 +147,13 @@ def simulate_battery_behavior(house_grid_power_watts):
 ###################################################################
 # ---- Reading CSV files from the command line ----
 if len(sys.argv) < 4 or len(sys.argv) > 5:
-    print("Usage: python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>")
+    print("Usage: python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv> [--export-csv]")
     sys.exit(1)
 house_phase_a_file = sys.argv[1]
 house_phase_b_file = sys.argv[2]
 house_phase_c_file = sys.argv[3]
+export_csv = sys.argv[4] if len(sys.argv) == 5 else False
+
 
 # Initial battery state
 energy_in_battery_Wh = [battery_capacity_Wh[i] * (battery_soc[i] / 100) for i in range(3)]
@@ -263,10 +265,6 @@ print(f"+ Merged - Timestamp: {merged_start_timestamp} to {merged_end_timestamp}
 # Number of days to process
 number_of_data_days = (merged_end_timestamp - merged_start_timestamp).days
 
-# Write the merged data to a new CSV file
-#print("Exporting merged data to merged_data.csv")
-#merged_data.to_csv("merged_data.csv", index=False)
-
 print("Starting simulation...")
 # ---- Execution on the data from the CSV files ----
 results = []
@@ -357,12 +355,17 @@ for i in range(len(merged_data)):
         "discharge_power_phase3_W": sim_result["phase3"]["discharge_power_watts"]
     })
 
+print("\n+ Successfully simulated battery behavior")
+
 # Convert results to DataFrame and export to CSV
 results_df = pd.DataFrame(results)
-#results_df.to_csv("simulation_results.csv", index=False)
-#print("\n+ Successfully exported simulation results to simulation_results.csv")
-print("\n+ Successfully simulated battery behavior")
-print("****************************************************************************************")
+if export_csv:
+    results_df.to_csv("simulation_results.csv", index=False)
+    print("+ Successfully exported simulation results to simulation_results.csv")
+
+print("**********************************")
+print("******* Simulation results *******")
+print("**********************************")
 # Data for injected energy
 data_injected = [
     ["Phase A Injected Off-Peak", int(current_injected_energy_Wh['phase_a']['HC'] / 1000), int(simulated_injected_energy_Wh['phase_a']['HC'] / 1000), int((simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['phase_a']['HC'] - current_injected_energy_Wh['phase_a']['HC']) / 1000 * (-1))],
@@ -452,6 +455,9 @@ headers = ["Status", "Phase 1", "Phase 2", "Phase 3"]
 
 print("")
 print("Battery Status:")
+print("This table illustrates the time the battery spends in each status.")
+print("A battery that is fully charged too often may indicate that it is undersized, whereas a battery that is frequently empty may suggest that it is oversized.")
+print("The distribution of charging and discharging can provide insights into whether the battery is used frequently or infrequently. If the discharging percentage exceeds the charging percentage, it indicates that the battery is frequently utilized to reduce grid consumption.")
 print(tabulate(battery_status_data, headers, tablefmt="grid"))
 
 # Statistics for charing power and discharging power when at the peak
@@ -479,4 +485,6 @@ headers = ["Metric", "Phase 1", "Phase 2", "Phase 3"]
 
 print("")
 print("Charging and Discharging Power at Peak:")
+print("The batteries are designed to charge and discharge at a specific maximum power level.")
+print("Frequent charging at maximum power may suggest the need for a more powerful system or an additional battery connected in parallel. The same consideration applies to discharging.")
 print(tabulate(charging_discharging_power_data, headers, tablefmt="grid"))
