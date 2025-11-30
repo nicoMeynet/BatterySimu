@@ -1,4 +1,4 @@
-#! /usr/bin/python3
+#!/usr/bin/env python
 """
 Battery Simulation Script
 This script simulates the behavior of a battery system in a house with three phases (A, B, and C). 
@@ -14,13 +14,13 @@ from tabulate import tabulate
 # CONFIGURATION
 ###################################################################
 # ---- Battery parameters ----
-battery_capacity_Wh = [3940, 3940, 3940]        # Battery capacity per phase (Wh)
-max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)
-max_discharge_power_watts = [1200, 1200, 1200]  # Max discharge power per phase (W)
+battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
+max_charge_power_watts = [2400, 2400, 2400]     # Max charge power per phase (W)
+max_discharge_power_watts = [2400, 2400, 2400]  # Max discharge power per phase (W)
 battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
 battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 6000                       # Battery lifespan in cycles
-battery_cost = 5847                             # Battery cost (CHF)
+battery_cost = 5370                             # Battery cost (CHF)
 battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
 
 # ---- Electricity tariff configuration ----
@@ -33,7 +33,7 @@ tariff_config = {
     },
     "off_peak": {
         "tariff_consume": 0.34,      # CHF/kWh for the rest of the time
-        "tariff_inject": 0.10        # CHF/kWh for the rest of the time
+        "tariff_inject": 0.6        # CHF/kWh for the rest of the time
     }
 }
 
