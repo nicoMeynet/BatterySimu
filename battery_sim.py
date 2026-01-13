@@ -195,6 +195,9 @@ def compute_configuration_hash(configuration: dict) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 def build_json_report(
+    start_date,
+    end_date,
+    number_of_points,
     number_of_data_days,
     battery_cost,
     data_injected,
@@ -210,115 +213,119 @@ def build_json_report(
     
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
-    
+
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "simulation_id": datetime.now(UTC).isoformat(),
 
-        
-        "configuration": build_configuration_section(),
+        "configuration": configuration,
         "configuration_hash": configuration_hash,
 
-        "meta": {
-            "duration_days": number_of_data_days
-        },
+        "simulation": {
+            "range": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "number_of_points": number_of_points,
+                "duration_days": number_of_data_days
+            },
 
-        "sections": {
-            "injected_energy": {
-                "title": "Injected Energy",
-                "description": [
-                    "The table below shows the energy injected into the grid.",
-                    "Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid."
-                ],
-                "headers": headers,
-                "rows": [
-                    {
-                        "label": row[0],
-                        "without_battery_kwh": row[1],
-                        "with_battery_kwh": row[2],
-                        "delta_kwh": row[3],
-                        "delta_chf": row[4],
+            "results": {
+                "injected_energy": {
+                    "title": "Injected Energy",
+                    "description": [
+                        "The table below shows the energy injected into the grid.",
+                        "Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid."
+                    ],
+                    "headers": headers,
+                    "rows": [
+                        {
+                            "label": row[0],
+                            "without_battery_kwh": row[1],
+                            "with_battery_kwh": row[2],
+                            "delta_kwh": row[3],
+                            "delta_chf": row[4],
+                        }
+                        for row in data_injected
+                    ],
+                    "total": {
+                        "without_battery_kwh": totals_injected[1],
+                        "with_battery_kwh": totals_injected[2],
+                        "delta_kwh": totals_injected[3],
+                        "delta_chf": totals_injected[4],
                     }
-                    for row in data_injected
-                ],
-                "total": {
-                    "without_battery_kwh": totals_injected[1],
-                    "with_battery_kwh": totals_injected[2],
-                    "delta_kwh": totals_injected[3],
-                    "delta_chf": totals_injected[4],
+                },
+
+                "consumed_energy": {
+                    "title": "Consumed Energy",
+                    "description": [
+                        "The table below shows the energy consumed from the grid.",
+                        "Adding a battery is expected to reduce the amount of energy consumed from the grid."
+                    ],
+                    "headers": headers,
+                    "rows": [
+                        {
+                            "label": row[0],
+                            "without_battery_kwh": row[1],
+                            "with_battery_kwh": row[2],
+                            "delta_kwh": row[3],
+                            "delta_chf": row[4],
+                        }
+                        for row in data_consumed
+                    ],
+                    "total": {
+                        "without_battery_kwh": totals_consumed[1],
+                        "with_battery_kwh": totals_consumed[2],
+                        "delta_kwh": totals_consumed[3],
+                        "delta_chf": totals_consumed[4],
+                    }
+                },
+
+                "rentability": {
+                    "total_gain_chf": total_gain_CHF,
+                    "annualized_gain_chf": total_gain_CHF / number_of_data_days * 365,
+                    "amortization_years": battery_cost / total_gain_CHF * number_of_data_days / 365
+                },
+
+                "battery_statistics": {
+                    "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"],
+                    "rows": [
+                        {
+                            "metric": row[0],
+                            "phase1": row[1],
+                            "phase2": row[2],
+                            "phase3": row[3],
+                            "max": row[4] if len(row) > 4 else None
+                        }
+                        for row in battery_stats_data
+                    ]
+                },
+
+                "battery_status": {
+                    "headers": ["Status", "Phase 1", "Phase 2", "Phase 3"],
+                    "rows": [
+                        {
+                            "status": row[0],
+                            "phase1": row[1],
+                            "phase2": row[2],
+                            "phase3": row[3]
+                        }
+                        for row in battery_status_data
+                    ],
+                    "total_samples": battery_status_phase1_total
+                },
+
+                "power_at_peak": {
+                    "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3"],
+                    "rows": [
+                        {
+                            "metric": row[0],
+                            "phase1": row[1],
+                            "phase2": row[2],
+                            "phase3": row[3]
+                        }
+                        for row in charging_discharging_power_data
+                    ]
                 }
-            },
-
-            "consumed_energy": {
-                "title": "Consumed Energy",
-                "description": [
-                    "The table below shows the energy consumed from the grid.",
-                    "Adding a battery is expected to reduce the amount of energy consumed from the grid."
-                ],
-                "headers": headers,
-                "rows": [
-                    {
-                        "label": row[0],
-                        "without_battery_kwh": row[1],
-                        "with_battery_kwh": row[2],
-                        "delta_kwh": row[3],
-                        "delta_chf": row[4],
-                    }
-                    for row in data_consumed
-                ],
-                "total": {
-                    "without_battery_kwh": totals_consumed[1],
-                    "with_battery_kwh": totals_consumed[2],
-                    "delta_kwh": totals_consumed[3],
-                    "delta_chf": totals_consumed[4],
-                }
-            },
-
-            "rentability": {
-                "total_gain_chf": total_gain_CHF,
-                "annualized_gain_chf": total_gain_CHF / number_of_data_days * 365,
-                "amortization_years": battery_cost / total_gain_CHF * number_of_data_days / 365
-            },
-
-            "battery_statistics": {
-                "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"],
-                "rows": [
-                    {
-                        "metric": row[0],
-                        "phase1": row[1],
-                        "phase2": row[2],
-                        "phase3": row[3],
-                        "max": row[4] if len(row) > 4 else None
-                    }
-                    for row in battery_stats_data
-                ]
-            },
-
-            "battery_status": {
-                "headers": ["Status", "Phase 1", "Phase 2", "Phase 3"],
-                "rows": [
-                    {
-                        "status": row[0],
-                        "phase1": row[1],
-                        "phase2": row[2],
-                        "phase3": row[3]
-                    }
-                    for row in battery_status_data
-                ],
-                "total_samples": battery_status_phase1_total
-            },
-
-            "power_at_peak": {
-                "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3"],
-                "rows": [
-                    {
-                        "metric": row[0],
-                        "phase1": row[1],
-                        "phase2": row[2],
-                        "phase3": row[3]
-                    }
-                    for row in charging_discharging_power_data
-                ]
             }
         }
     }
@@ -700,6 +707,9 @@ print("**********************************")
 # Build and export JSON report
 print("Exporting JSON report...")
 json_report = build_json_report(
+    start_date=merged_start_timestamp,
+    end_date=merged_end_timestamp,
+    number_of_points=merged_data_quantity,
     number_of_data_days=number_of_data_days,
     battery_cost=battery_cost,
     data_injected=data_injected,
