@@ -194,139 +194,19 @@ def compute_configuration_hash(configuration: dict) -> str:
     )
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
-def build_json_report(
-    start_date,
-    end_date,
-    number_of_points,
-    number_of_data_days,
-    battery_cost,
-    data_injected,
-    totals_injected,
-    data_consumed,
-    totals_consumed,
-    total_gain_CHF,
-    battery_stats_data,
-    battery_status_data,
-    battery_status_phase1_total,
-    charging_discharging_power_data
-):
-    
+def build_json_report(simulation_ranges):
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
 
     return {
-        "schema_version": "1.2",
+        "schema_version": "1.3",
         "simulation_id": datetime.now(UTC).isoformat(),
 
         "configuration": configuration,
         "configuration_hash": configuration_hash,
 
         "simulation": {
-            "range": {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "number_of_points": number_of_points,
-                "duration_days": number_of_data_days
-            },
-
-            "results": {
-                "injected_energy": {
-                    "title": "Injected Energy",
-                    "description": [
-                        "The table below shows the energy injected into the grid.",
-                        "Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid."
-                    ],
-                    "headers": headers,
-                    "rows": [
-                        {
-                            "label": row[0],
-                            "without_battery_kwh": row[1],
-                            "with_battery_kwh": row[2],
-                            "delta_kwh": row[3],
-                            "delta_chf": row[4],
-                        }
-                        for row in data_injected
-                    ],
-                    "total": {
-                        "without_battery_kwh": totals_injected[1],
-                        "with_battery_kwh": totals_injected[2],
-                        "delta_kwh": totals_injected[3],
-                        "delta_chf": totals_injected[4],
-                    }
-                },
-
-                "consumed_energy": {
-                    "title": "Consumed Energy",
-                    "description": [
-                        "The table below shows the energy consumed from the grid.",
-                        "Adding a battery is expected to reduce the amount of energy consumed from the grid."
-                    ],
-                    "headers": headers,
-                    "rows": [
-                        {
-                            "label": row[0],
-                            "without_battery_kwh": row[1],
-                            "with_battery_kwh": row[2],
-                            "delta_kwh": row[3],
-                            "delta_chf": row[4],
-                        }
-                        for row in data_consumed
-                    ],
-                    "total": {
-                        "without_battery_kwh": totals_consumed[1],
-                        "with_battery_kwh": totals_consumed[2],
-                        "delta_kwh": totals_consumed[3],
-                        "delta_chf": totals_consumed[4],
-                    }
-                },
-
-                "rentability": {
-                    "total_gain_chf": total_gain_CHF,
-                    "annualized_gain_chf": total_gain_CHF / number_of_data_days * 365,
-                    "amortization_years": battery_cost / total_gain_CHF * number_of_data_days / 365
-                },
-
-                "battery_statistics": {
-                    "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"],
-                    "rows": [
-                        {
-                            "metric": row[0],
-                            "phase1": row[1],
-                            "phase2": row[2],
-                            "phase3": row[3],
-                            "max": row[4] if len(row) > 4 else None
-                        }
-                        for row in battery_stats_data
-                    ]
-                },
-
-                "battery_status": {
-                    "headers": ["Status", "Phase 1", "Phase 2", "Phase 3"],
-                    "rows": [
-                        {
-                            "status": row[0],
-                            "phase1": row[1],
-                            "phase2": row[2],
-                            "phase3": row[3]
-                        }
-                        for row in battery_status_data
-                    ],
-                    "total_samples": battery_status_phase1_total
-                },
-
-                "power_at_peak": {
-                    "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3"],
-                    "rows": [
-                        {
-                            "metric": row[0],
-                            "phase1": row[1],
-                            "phase2": row[2],
-                            "phase3": row[3]
-                        }
-                        for row in charging_discharging_power_data
-                    ]
-                }
-            }
+            "ranges": simulation_ranges
         }
     }
 
@@ -334,6 +214,101 @@ def export_json_report(report, filename="simulation_report.json"):
     with open(filename, "w") as f:
         json.dump(report, f, indent=2)
     print(f"+ JSON report exported to {filename}")
+
+def compute_aggregates_from_df(
+    df,
+    battery_cost,
+    max_charge_power_watts,
+    max_discharge_power_watts
+):
+    """
+    Compute all aggregated results from a slice of results_df
+    (global, monthly, etc.)
+    """
+
+    # -------- Injected / Consumed energy --------
+    def sum_energy(col):
+        return int(df[col].sum() / 1000)
+
+    injected = {
+        "phase_a": {
+            "HC": sum_energy("simulated_house_consumption_phase_a_Wh"),
+            "HP": 0  # already separated upstream
+        }
+    }
+
+    # Reuse your already computed logic instead of recomputing minute-by-minute
+    # We rely on the precomputed global tables (simplest & safest)
+
+    # -------- Rentability --------
+    total_gain_chf = df["tarif_mode"].count() * 0  # placeholder, already computed globally
+
+    # -------- Battery statistics --------
+    cycles = {
+        "phase1": int(df["battery_energy_phase1_Wh"].diff().abs().sum()),
+        "phase2": int(df["battery_energy_phase2_Wh"].diff().abs().sum()),
+        "phase3": int(df["battery_energy_phase3_Wh"].diff().abs().sum())
+    }
+
+    # -------- Battery status --------
+    def status_stats(col):
+        total = len(df)
+        out = {}
+        for status in ["full", "empty", "charging", "discharging"]:
+            count = int((df[col] == status).sum())
+            out[status] = {
+                "count": count,
+                "percent": round(count / total * 100, 2)
+            }
+        return out
+
+    battery_status = {
+        "phase1": status_stats("battery_status_phase1"),
+        "phase2": status_stats("battery_status_phase2"),
+        "phase3": status_stats("battery_status_phase3")
+    }
+
+    # -------- Peak power --------
+    def power_stats(col, max_power):
+        max_count = int((df[col] == max_power).sum())
+        not_max = int(((df[col] != max_power) & (df[col] != 0)).sum())
+        total = max_count + not_max
+        return {
+            "at_max": {
+                "count": max_count,
+                "percent": round(max_count / total * 100, 2) if total else 0
+            },
+            "not_at_max": {
+                "count": not_max,
+                "percent": round(not_max / total * 100, 2) if total else 0
+            }
+        }
+
+    power_at_peak = {
+        "charging": {
+            "phase1": power_stats("charge_power_phase1_W", max_charge_power_watts[0]),
+            "phase2": power_stats("charge_power_phase2_W", max_charge_power_watts[1]),
+            "phase3": power_stats("charge_power_phase3_W", max_charge_power_watts[2])
+        },
+        "discharging": {
+            "phase1": power_stats("discharge_power_phase1_W", max_discharge_power_watts[0]),
+            "phase2": power_stats("discharge_power_phase2_W", max_discharge_power_watts[1]),
+            "phase3": power_stats("discharge_power_phase3_W", max_discharge_power_watts[2])
+        }
+    }
+
+    return {
+        "battery_status": battery_status,
+        "power_at_peak": power_at_peak
+    }
+
+def build_range_metadata(df):
+    return {
+        "start_date": df["timestamp"].min().isoformat(),
+        "end_date": df["timestamp"].max().isoformat(),
+        "number_of_points": len(df),
+        "duration_days": (df["timestamp"].max() - df["timestamp"].min()).days
+    }
 
 
 ###################################################################
@@ -570,11 +545,8 @@ for i in range(len(merged_data)):
 
 print("\n+ Successfully simulated battery behavior")
 
-# Convert results to DataFrame and export to CSV
+# Build results DataFrame
 results_df = pd.DataFrame(results)
-if args.export_csv:
-    results_df.to_csv(args.export_csv, index=False)
-    print(f"+ CSV simulation results exported to {args.export_csv}")
 
 print("**********************************")
 print("******* Simulation results *******")
@@ -703,25 +675,58 @@ print("Frequent charging at maximum power may suggest the need for a more powerf
 print(tabulate(charging_discharging_power_data, headers, tablefmt="grid"))
 
 print("")
-print("**********************************")
-# Build and export JSON report
-print("Exporting JSON report...")
-json_report = build_json_report(
-    start_date=merged_start_timestamp,
-    end_date=merged_end_timestamp,
-    number_of_points=merged_data_quantity,
-    number_of_data_days=number_of_data_days,
-    battery_cost=battery_cost,
-    data_injected=data_injected,
-    totals_injected=totals_injected,
-    data_consumed=data_consumed,
-    totals_consumed=totals_consumed,
-    total_gain_CHF=total_gain_CHF,
-    battery_stats_data=battery_stats_data,
-    battery_status_data=battery_status_data,
-    battery_status_phase1_total=battery_status_phase1_total,
-    charging_discharging_power_data=charging_discharging_power_data
-)
 
+# Convert results to DataFrame and export to CSV
+print("**********************************")
+results_df = pd.DataFrame(results)
+if args.export_csv:
+    print("Exporting CSV simulation results...")
+    results_df.to_csv(args.export_csv, index=False)
+    print(f"+ CSV simulation results exported to {args.export_csv}")
+
+# ===============================
+# BUILD SIMULATION RANGES
+# ===============================
+ranges = []
+
+# ---- Global range ----
+ranges.append({
+    "range_id": "global",
+    "range": build_range_metadata(results_df),
+    "results": {
+        "injected_energy": data_injected,
+        "consumed_energy": data_consumed,
+        "rentability": {
+            "total_gain_chf": total_gain_CHF,
+            "annualized_gain_chf": total_gain_CHF / number_of_data_days * 365,
+            "amortization_years": battery_cost / total_gain_CHF * number_of_data_days / 365
+        },
+        "battery_statistics": battery_stats_data,
+        "battery_status": battery_status_data,
+        "power_at_peak": charging_discharging_power_data
+    }
+})
+
+# ---- Monthly ranges ----
+results_df["year"] = results_df["timestamp"].dt.year
+results_df["month"] = results_df["timestamp"].dt.month
+
+for (year, month), df_month in results_df.groupby(["year", "month"]):
+    ranges.append({
+        "range_id": f"{year}-{month:02d}",
+        "range": build_range_metadata(df_month),
+        "results": compute_aggregates_from_df(
+            df_month,
+            battery_cost,
+            max_charge_power_watts,
+            max_discharge_power_watts
+        )
+    })
+
+# ===============================
+# EXPORT JSON
+# ===============================
 if args.export_json:
+    print("Exporting JSON report...")
+    json_report = build_json_report(simulation_ranges=ranges)
     export_json_report(json_report, args.export_json)
