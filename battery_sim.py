@@ -6,34 +6,45 @@ It reads power consumption data from CSV files, processes the data, and simulate
 charging and discharging behavior based on the house's power consumption and predefined battery 
 parameters. The script also calculates the financial impact of using the battery system.
 """
+import argparse
 import pandas as pd
 import sys
 from tabulate import tabulate
+import json
+import hashlib
+from datetime import datetime, UTC
+
 
 ###################################################################
 # CONFIGURATION
 ###################################################################
 # ---- Battery parameters ----
-battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
+#battery_capacity_Wh = [2880, 2880, 2880]        # Battery capacity per phase (Wh)
+#battery_cost = 3270                             # Battery cost (CHF)
+#battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
+#battery_cost = 5370                             # Battery cost (CHF)
+battery_capacity_Wh = [8640, 8640, 8640]        # Battery capacity per phase (Wh)
+battery_cost = 7500                             # Battery cost (CHF)
+#battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
+#battery_cost = 9600                             # Battery cost (CHF)
 max_charge_power_watts = [2400, 2400, 2400]     # Max charge power per phase (W)
 max_discharge_power_watts = [2400, 2400, 2400]  # Max discharge power per phase (W)
 battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
 battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 6000                       # Battery lifespan in cycles
-battery_cost = 5370                             # Battery cost (CHF)
 battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
 
 # ---- Electricity tariff configuration ----
 tariff_config = {
     "peak": {
         "tariff_consume": 0.34,      # CHF/kWh
-        "tariff_inject": 0.10,       # CHF/kWh
-        "days": [0, 1, 2, 3, 4],     # Monday to Friday
+        "tariff_inject": 0.06,       # CHF/kWh
+        "days": [0, 1, 2, 3, 4],     # 0:Monday to 4:Friday
         "hours": range(17, 22)       # 5 PM to 10 PM
     },
     "off_peak": {
         "tariff_consume": 0.34,      # CHF/kWh for the rest of the time
-        "tariff_inject": 0.6        # CHF/kWh for the rest of the time
+        "tariff_inject": 0.06        # CHF/kWh for the rest of the time
     }
 }
 
@@ -138,21 +149,216 @@ def simulate_battery_behavior(house_grid_power_watts):
             "battery_status": battery_status[2],
             "battery_cycle": battery_cycle[2],
             "charge_power_watts": charge_power_watts[2],
-            "discharge_power_watts": discharge_power_watts
+            "discharge_power_watts": discharge_power_watts[2]
         }
     }
+
+def build_configuration_section():
+    return {
+        "battery": {
+            "capacity_Wh_per_phase": battery_capacity_Wh,
+            "cost_chf": battery_cost,
+            "max_charge_power_W_per_phase": max_charge_power_watts,
+            "max_discharge_power_W_per_phase": max_discharge_power_watts,
+            "charge_efficiency": battery_charge_efficiency,
+            "discharge_efficiency": battery_discharge_efficiency,
+            "max_cycles": battery_max_cycles,
+            "initial_soc_percent_per_phase": battery_soc
+        },
+        "tariff": {
+            "peak": {
+                "tariff_consume_chf_per_kwh": tariff_config["peak"]["tariff_consume"],
+                "tariff_inject_chf_per_kwh": tariff_config["peak"]["tariff_inject"],
+                "weekdays": tariff_config["peak"]["days"],
+                "hours": list(tariff_config["peak"]["hours"])
+            },
+            "off_peak": {
+                "tariff_consume_chf_per_kwh": tariff_config["off_peak"]["tariff_consume"],
+                "tariff_inject_chf_per_kwh": tariff_config["off_peak"]["tariff_inject"]
+            }
+        }
+    }
+
+def compute_configuration_hash(configuration: dict) -> str:
+    """
+    Compute a deterministic SHA-256 hash of the configuration.
+
+    - Keys are sorted
+    - No whitespace differences
+    - Stable across runs
+    """
+    canonical_json = json.dumps(
+        configuration,
+        sort_keys=True,
+        separators=(",", ":")
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+def build_json_report(
+    number_of_data_days,
+    battery_cost,
+    data_injected,
+    totals_injected,
+    data_consumed,
+    totals_consumed,
+    total_gain_CHF,
+    battery_stats_data,
+    battery_status_data,
+    battery_status_phase1_total,
+    charging_discharging_power_data
+):
+    
+    configuration = build_configuration_section()
+    configuration_hash = compute_configuration_hash(configuration)
+    
+    return {
+        "schema_version": "1.1",
+        "simulation_id": datetime.now(UTC).isoformat(),
+
+        
+        "configuration": build_configuration_section(),
+        "configuration_hash": configuration_hash,
+
+        "meta": {
+            "duration_days": number_of_data_days
+        },
+
+        "sections": {
+            "injected_energy": {
+                "title": "Injected Energy",
+                "description": [
+                    "The table below shows the energy injected into the grid.",
+                    "Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid."
+                ],
+                "headers": headers,
+                "rows": [
+                    {
+                        "label": row[0],
+                        "without_battery_kwh": row[1],
+                        "with_battery_kwh": row[2],
+                        "delta_kwh": row[3],
+                        "delta_chf": row[4],
+                    }
+                    for row in data_injected
+                ],
+                "total": {
+                    "without_battery_kwh": totals_injected[1],
+                    "with_battery_kwh": totals_injected[2],
+                    "delta_kwh": totals_injected[3],
+                    "delta_chf": totals_injected[4],
+                }
+            },
+
+            "consumed_energy": {
+                "title": "Consumed Energy",
+                "description": [
+                    "The table below shows the energy consumed from the grid.",
+                    "Adding a battery is expected to reduce the amount of energy consumed from the grid."
+                ],
+                "headers": headers,
+                "rows": [
+                    {
+                        "label": row[0],
+                        "without_battery_kwh": row[1],
+                        "with_battery_kwh": row[2],
+                        "delta_kwh": row[3],
+                        "delta_chf": row[4],
+                    }
+                    for row in data_consumed
+                ],
+                "total": {
+                    "without_battery_kwh": totals_consumed[1],
+                    "with_battery_kwh": totals_consumed[2],
+                    "delta_kwh": totals_consumed[3],
+                    "delta_chf": totals_consumed[4],
+                }
+            },
+
+            "rentability": {
+                "total_gain_chf": total_gain_CHF,
+                "annualized_gain_chf": total_gain_CHF / number_of_data_days * 365,
+                "amortization_years": battery_cost / total_gain_CHF * number_of_data_days / 365
+            },
+
+            "battery_statistics": {
+                "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"],
+                "rows": [
+                    {
+                        "metric": row[0],
+                        "phase1": row[1],
+                        "phase2": row[2],
+                        "phase3": row[3],
+                        "max": row[4] if len(row) > 4 else None
+                    }
+                    for row in battery_stats_data
+                ]
+            },
+
+            "battery_status": {
+                "headers": ["Status", "Phase 1", "Phase 2", "Phase 3"],
+                "rows": [
+                    {
+                        "status": row[0],
+                        "phase1": row[1],
+                        "phase2": row[2],
+                        "phase3": row[3]
+                    }
+                    for row in battery_status_data
+                ],
+                "total_samples": battery_status_phase1_total
+            },
+
+            "power_at_peak": {
+                "headers": ["Metric", "Phase 1", "Phase 2", "Phase 3"],
+                "rows": [
+                    {
+                        "metric": row[0],
+                        "phase1": row[1],
+                        "phase2": row[2],
+                        "phase3": row[3]
+                    }
+                    for row in charging_discharging_power_data
+                ]
+            }
+        }
+    }
+
+def export_json_report(report, filename="simulation_report.json"):
+    with open(filename, "w") as f:
+        json.dump(report, f, indent=2)
+    print(f"+ JSON report exported to {filename}")
+
 
 ###################################################################
 # MAIN
 ###################################################################
-# ---- Reading CSV files from the command line ----
-if len(sys.argv) < 4 or len(sys.argv) > 5:
-    print("Usage: python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv> [--export-csv]")
-    sys.exit(1)
-house_phase_a_file = sys.argv[1]
-house_phase_b_file = sys.argv[2]
-house_phase_c_file = sys.argv[3]
-export_csv = sys.argv[4] if len(sys.argv) == 5 else False
+parser = argparse.ArgumentParser(
+    description="Battery simulation with optional exports"
+)
+
+# Positional inputs
+parser.add_argument("house_phase_a", help="CSV file for phase A")
+parser.add_argument("house_phase_b", help="CSV file for phase B")
+parser.add_argument("house_phase_c", help="CSV file for phase C")
+
+# Optional exports
+parser.add_argument(
+    "--export-csv",
+    metavar="FILE",
+    help="Export per-timestep simulation results to CSV"
+)
+
+parser.add_argument(
+    "--export-json",
+    metavar="FILE",
+    help="Export full aggregated simulation report to JSON"
+)
+
+args = parser.parse_args()
+
+house_phase_a_file = args.house_phase_a
+house_phase_b_file = args.house_phase_b
+house_phase_c_file = args.house_phase_c
 
 
 # Initial battery state
@@ -359,9 +565,9 @@ print("\n+ Successfully simulated battery behavior")
 
 # Convert results to DataFrame and export to CSV
 results_df = pd.DataFrame(results)
-if export_csv:
-    results_df.to_csv("simulation_results.csv", index=False)
-    print("+ Successfully exported simulation results to simulation_results.csv")
+if args.export_csv:
+    results_df.to_csv(args.export_csv, index=False)
+    print(f"+ CSV simulation results exported to {args.export_csv}")
 
 print("**********************************")
 print("******* Simulation results *******")
@@ -488,3 +694,24 @@ print("Charging and Discharging Power at Peak:")
 print("The batteries are designed to charge and discharge at a specific maximum power level.")
 print("Frequent charging at maximum power may suggest the need for a more powerful system or an additional battery connected in parallel. The same consideration applies to discharging.")
 print(tabulate(charging_discharging_power_data, headers, tablefmt="grid"))
+
+print("")
+print("**********************************")
+# Build and export JSON report
+print("Exporting JSON report...")
+json_report = build_json_report(
+    number_of_data_days=number_of_data_days,
+    battery_cost=battery_cost,
+    data_injected=data_injected,
+    totals_injected=totals_injected,
+    data_consumed=data_consumed,
+    totals_consumed=totals_consumed,
+    total_gain_CHF=total_gain_CHF,
+    battery_stats_data=battery_stats_data,
+    battery_status_data=battery_status_data,
+    battery_status_phase1_total=battery_status_phase1_total,
+    charging_discharging_power_data=charging_discharging_power_data
+)
+
+if args.export_json:
+    export_json_report(json_report, args.export_json)

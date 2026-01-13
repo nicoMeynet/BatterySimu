@@ -1,3 +1,7 @@
 simulation_results.csv
 simulation_results.csv.zip
 venv
+sim.csv
+sim.json
+dataset/.DS_Store
+dataset/2025/.DS_Store
