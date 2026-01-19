@@ -201,7 +201,7 @@ def build_json_report(simulation_ranges):
     configuration_hash = compute_configuration_hash(configuration)
 
     return {
-        "schema_version": "1.3",
+        "schema_version": "1.4",
         "simulation_id": datetime.now(UTC).isoformat(),
 
         "configuration": configuration,
@@ -232,7 +232,8 @@ def build_battery_statistics(
     battery_max_cycles=None
 ):
     return {
-        "cycles": cycles,  # authoritative (global) or None (monthly)
+        "cycles": cycles,
+        "cycles_scope": "global_only" if cycles is not None else "not_applicable",
         "max_cycles": battery_max_cycles,
         "remaining_energy_Wh": {
             "phase1": r(df["battery_energy_phase1_Wh"].iloc[-1], 1),
@@ -263,10 +264,15 @@ def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts)
     def power_stats(col, max_power):
         total = len(df[df[col] != 0])
         if total == 0:
-            return {"at_max": None, "not_at_max": None}
+            return {
+                "data_available": False,
+                "at_max": {"count": 0, "percent": 0.0},
+                "not_at_max": {"count": 0, "percent": 0.0}
+            }
 
         at_max = (df[col] == max_power).sum()
         return {
+            "data_available": True,
             "at_max": {
                 "count": int(at_max),
                 "percent": round(at_max / total * 100, 2)
@@ -313,6 +319,8 @@ def build_canonical_results(
     energy_rent = compute_energy_and_rentability_from_df(df, duration_days)
 
     annualized_gain = energy_rent["rentability"]["annualized_gain_chf"]
+    if duration_days < 7:
+        annualized_gain = None
 
     amortization_years = (
         round(battery_cost / annualized_gain, 2)
@@ -326,6 +334,7 @@ def build_canonical_results(
         "rentability": {
             "total_gain_chf": energy_rent["rentability"]["total_gain_chf"],
             "annualized_gain_chf": annualized_gain,
+            "annualization_method": "linear_extrapolation",
             "amortization_years": amortization_years,
             "note": (
                 "Global range (amortization enabled)"
@@ -409,21 +418,40 @@ def compute_energy_and_rentability_from_df(df, duration_days):
 
             total_gain_chf += inj_chf + con_chf
 
+    annualized = (
+        r(total_gain_chf / duration_days * 365)
+        if duration_days > 0
+        else None
+    )
+
+
     return {
         "energy": {
+            "unit": "kWh",
+            "sign_convention": "negative = reduction vs without battery",
             "injected": injected_table,
             "consumed": consumed_table
         },
         "rentability": {
             "total_gain_chf": r(total_gain_chf),
-            "annualized_gain_chf": r(total_gain_chf / duration_days * 365),
+            "annualized_gain_chf": annualized,
             "amortization_years": None,
             "note": "Delta vs without battery"
         }
     }
 
 def r(x, digits=2):
-    return round(x, digits)
+    v = round(x, digits)
+    return 0.0 if abs(v) < 1e-9 else v
+
+def print_progress_bar(current, total, prefix="Progress"):
+    percent = current / total * 100
+    bar_width = 40
+    filled = int(percent / 100 * bar_width)
+    sys.stdout.write(
+        f"\r+ {prefix}: [{'#' * filled}{' ' * (bar_width - filled)}] {percent:.2f}%"
+    )
+    sys.stdout.flush()
 
 ###################################################################
 # MAIN
@@ -581,15 +609,10 @@ simulated_consumed_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP":
 current_injected_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP": 0, "HC": 0}, "phase_c": {"HP": 0, "HC": 0}}
 current_consumed_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP": 0, "HC": 0}, "phase_c": {"HP": 0, "HC": 0}}
 
-for i in range(len(merged_data)):
-    # Print progress bar
-    progress = (i + 1) / len(merged_data) * 100
-    bar_width = 40
-    filled = int(progress / 100 * bar_width)
-    sys.stdout.write(
-        f"\r+ Progress: [{'#' * filled}{' ' * (bar_width - filled)}] {progress:.2f}%"
-    )
-    sys.stdout.flush()
+total_steps = len(merged_data)
+
+for i in range(total_steps):
+    print_progress_bar(i + 1, total_steps, prefix="Progress")
 
     # Get the current timestamp, weekday and hour
     timestamp = merged_data.iloc[i]["timestamp"]
@@ -667,9 +690,9 @@ print("\n+ Successfully simulated battery behavior")
 
 # AUTHORITATIVE BATTERY CYCLES (GLOBAL)
 battery_cycles_global = {
-    "phase1": round(battery_cycle_total["phase1"], 2),
-    "phase2": round(battery_cycle_total["phase2"], 2),
-    "phase3": round(battery_cycle_total["phase3"], 2)
+    "phase1": r(battery_cycle_total["phase1"]),
+    "phase2": r(battery_cycle_total["phase2"]),
+    "phase3": r(battery_cycle_total["phase3"])
 }
 
 # Build results DataFrame
@@ -903,7 +926,19 @@ if args.export_csv:
 # ===============================
 # BUILD SIMULATION RANGES
 # ===============================
+# ===============================
+# BUILD SIMULATION RANGES
+# ===============================
+print("Building simulation ranges...")
+
 ranges = []
+range_index = 0
+
+# Prepare monthly groups and total range count (for progress bar)
+results_df["year"] = results_df["timestamp"].dt.year
+results_df["month"] = results_df["timestamp"].dt.month
+monthly_groups = list(results_df.groupby(["year", "month"]))
+total_ranges = 1 + len(monthly_groups)  # global + monthly
 
 # ---- Global range ----
 ranges.append({
@@ -918,11 +953,11 @@ ranges.append({
     )
 })
 
-# ---- Monthly ranges ----
-results_df["year"] = results_df["timestamp"].dt.year
-results_df["month"] = results_df["timestamp"].dt.month
+range_index += 1
+print_progress_bar(range_index, total_ranges, prefix="Ranges")
 
-for (year, month), df_month in results_df.groupby(["year", "month"]):
+# ---- Monthly ranges ----
+for (year, month), df_month in monthly_groups:
     duration_days_month = max(
         1,
         (df_month["timestamp"].max() - df_month["timestamp"].min()).days
@@ -939,6 +974,11 @@ for (year, month), df_month in results_df.groupby(["year", "month"]):
             cycles=None
         )
     })
+
+    range_index += 1
+    print_progress_bar(range_index, total_ranges, prefix="Ranges")
+
+print()  # newline after progress bar
 
 # ===============================
 # EXPORT JSON
