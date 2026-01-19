@@ -215,101 +215,6 @@ def export_json_report(report, filename="simulation_report.json"):
         json.dump(report, f, indent=2)
     print(f"+ JSON report exported to {filename}")
 
-def compute_aggregates_from_df(
-    df,
-    battery_cost,
-    max_charge_power_watts,
-    max_discharge_power_watts
-):
-    """
-    Compute all aggregated results from a slice of results_df
-    (global, monthly, etc.)
-    """
-
-    # -------- Injected / Consumed energy --------
-    def sum_energy(col):
-        return int(df[col].sum() / 1000)
-
-    injected = {
-        "phase_a": {
-            "HC": sum_energy("simulated_house_consumption_phase_a_Wh"),
-            "HP": 0  # already separated upstream
-        }
-    }
-
-    # Reuse your already computed logic instead of recomputing minute-by-minute
-    # We rely on the precomputed global tables (simplest & safest)
-
-    # -------- Rentability --------
-    total_gain_chf = df["tarif_mode"].count() * 0  # placeholder, already computed globally
-
-    # -------- Battery statistics --------
-    cycles = {
-        "phase1": int(df["battery_energy_phase1_Wh"].diff().abs().sum()),
-        "phase2": int(df["battery_energy_phase2_Wh"].diff().abs().sum()),
-        "phase3": int(df["battery_energy_phase3_Wh"].diff().abs().sum())
-    }
-
-    # -------- Battery status --------
-    def status_stats(col):
-        total = len(df)
-        out = {}
-        for status in ["full", "empty", "charging", "discharging"]:
-            count = int((df[col] == status).sum())
-            out[status] = {
-                "count": count,
-                "percent": r(count / total * 100)
-            }
-        return out
-
-    battery_status = {
-        "phase1": status_stats("battery_status_phase1"),
-        "phase2": status_stats("battery_status_phase2"),
-        "phase3": status_stats("battery_status_phase3")
-    }
-
-    # -------- Peak power --------
-    def power_stats(col, max_power):
-        max_count = int((df[col] == max_power).sum())
-        not_max = int(((df[col] != max_power) & (df[col] != 0)).sum())
-        total = max_count + not_max
-        return {
-            "at_max": {
-                "count": max_count,
-                "percent": round(max_count / total * 100, 2) if total else 0
-            },
-            "not_at_max": {
-                "count": not_max,
-                "percent": round(not_max / total * 100, 2) if total else 0
-            }
-        }
-
-    power_at_peak = {
-        "charging": {
-            "phase1": power_stats("charge_power_phase1_W", max_charge_power_watts[0]),
-            "phase2": power_stats("charge_power_phase2_W", max_charge_power_watts[1]),
-            "phase3": power_stats("charge_power_phase3_W", max_charge_power_watts[2])
-        },
-        "discharging": {
-            "phase1": power_stats("discharge_power_phase1_W", max_discharge_power_watts[0]),
-            "phase2": power_stats("discharge_power_phase2_W", max_discharge_power_watts[1]),
-            "phase3": power_stats("discharge_power_phase3_W", max_discharge_power_watts[2])
-        }
-    }
-
-    energy_and_rentability = compute_energy_and_rentability_from_df(df)
-
-    return build_results_block(
-        injected_energy=energy_and_rentability["energy"]["injected"],
-        consumed_energy=energy_and_rentability["energy"]["consumed"],
-        rentability=energy_and_rentability["rentability"],
-        battery_statistics={
-            "cycles": cycles
-        },
-        battery_status=battery_status,
-        power_at_peak=power_at_peak
-    )
-
 def build_range_metadata(df):
     return {
         "start_date": df["timestamp"].min().isoformat(),
@@ -411,15 +316,14 @@ def compute_energy_and_rentability_from_df(df):
         }
     }
 
-def compute_battery_statistics(df, battery_max_cycles):
-    cycles = {
-        "phase1": int(round(df["battery_energy_phase1_Wh"].diff().abs().sum())),
-        "phase2": int(round(df["battery_energy_phase2_Wh"].diff().abs().sum())),
-        "phase3": int(round(df["battery_energy_phase3_Wh"].diff().abs().sum()))
-    }
-
+def build_battery_statistics(
+    df,
+    *,
+    cycles=None,
+    battery_max_cycles=None
+):
     return {
-        "cycles": cycles,
+        "cycles": cycles,  # authoritative (global) or None (monthly)
         "max_cycles": battery_max_cycles,
         "remaining_energy_Wh": {
             "phase1": r(df["battery_energy_phase1_Wh"].iloc[-1], 1),
@@ -477,7 +381,13 @@ def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts)
         }
     }
 
-def build_canonical_results(df, battery_cost, number_of_days):
+def build_canonical_results(
+    df,
+    battery_cost,
+    number_of_days,
+    *,
+    cycles=None
+):
     energy_rent = compute_energy_and_rentability_from_df(df)
 
     return {
@@ -486,12 +396,16 @@ def build_canonical_results(df, battery_cost, number_of_days):
             **energy_rent["rentability"],
             "amortization_years": (
                 round(battery_cost / energy_rent["rentability"]["annualized_gain_chf"], 2)
-                if energy_rent["rentability"]["annualized_gain_chf"] > 0
+                if cycles is not None and energy_rent["rentability"]["annualized_gain_chf"] > 0
                 else None
             )
         },
         "battery": {
-            "statistics": compute_battery_statistics(df, battery_max_cycles),
+            "statistics": build_battery_statistics(
+                df,
+                cycles=cycles,
+                battery_max_cycles=battery_max_cycles
+            ),
             "status": compute_battery_status(df),
             "power_at_peak": compute_power_at_peak(
                 df,
@@ -500,6 +414,7 @@ def build_canonical_results(df, battery_cost, number_of_days):
             )
         }
     }
+
 def r(x, digits=2):
     return round(x, digits)
 
@@ -648,7 +563,6 @@ number_of_data_days = (merged_end_timestamp - merged_start_timestamp).days
 print("Starting simulation...")
 # ---- Execution on the data from the CSV files ----
 results = []
-energy_production_Wh_total = 0
 battery_cycle_total = {"phase1": 0, "phase2": 0, "phase3": 0}
 
 # Initialize dictionaries to store injected and consumed energy for each phase and tariff mode
@@ -736,6 +650,13 @@ for i in range(len(merged_data)):
     })
 
 print("\n+ Successfully simulated battery behavior")
+
+# AUTHORITATIVE BATTERY CYCLES (GLOBAL)
+battery_cycles_global = {
+    "phase1": round(battery_cycle_total["phase1"], 2),
+    "phase2": round(battery_cycle_total["phase2"], 2),
+    "phase3": round(battery_cycle_total["phase3"], 2)
+}
 
 # Build results DataFrame
 results_df = pd.DataFrame(results)
@@ -870,16 +791,10 @@ print("")
 
 # Convert results to DataFrame and export to CSV
 print("**********************************")
-results_df = pd.DataFrame(results)
 if args.export_csv:
     print("Exporting CSV simulation results...")
     results_df.to_csv(args.export_csv, index=False)
     print(f"+ CSV simulation results exported to {args.export_csv}")
-
-# ===============================
-# GLOBAL AGGREGATES (ONCE)
-# ===============================
-global_energy_and_rentability = compute_energy_and_rentability_from_df(results_df)
 
 # ===============================
 # BUILD SIMULATION RANGES
@@ -894,7 +809,8 @@ ranges.append({
     "results": build_canonical_results(
         results_df,
         battery_cost,
-        number_of_data_days
+        number_of_data_days,
+        cycles=battery_cycles_global
     )
 })
 
@@ -903,6 +819,10 @@ results_df["year"] = results_df["timestamp"].dt.year
 results_df["month"] = results_df["timestamp"].dt.month
 
 for (year, month), df_month in results_df.groupby(["year", "month"]):
+    number_of_days = max(
+        1,
+        (df_month["timestamp"].max() - df_month["timestamp"].min()).days
+    )
     ranges.append({
         "range_id": f"{year}-{month:02d}",
         "range_type": "monthly",
@@ -910,7 +830,8 @@ for (year, month), df_month in results_df.groupby(["year", "month"]):
         "results": build_canonical_results(
             df_month,
             battery_cost,
-            number_of_data_days
+            number_of_days,
+            cycles=None
         )
     })
 
