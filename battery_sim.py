@@ -54,7 +54,7 @@ tariff_config = {
 # ---- Function to determine the current tariff mode ----
 # HP = Peak Hours
 # HC = Off-Peak Hours
-def get_current_tarif_mode(hour, day):
+def get_current_tariff_mode(hour, day):
     if day in tariff_config["peak"]["days"] and hour in tariff_config["peak"]["hours"]:
         return "HP" # Peak hours
     return "HC" # Off-peak hours
@@ -78,11 +78,11 @@ def calculate_energy_Wh(power_watts, duration_minutes):
     return power_watts * duration_minutes / 60
 
 # ---- Update the consumed or injected energy for a given phase and tariff mode ----
-def update_energy(energy, tarif_mode, consumed_dict, injected_dict, phase):
+def update_energy(energy, tariff_mode, consumed_dict, injected_dict, phase):
     if energy < 0:
-        injected_dict[phase][tarif_mode] += abs(energy)
+        injected_dict[phase][tariff_mode] += abs(energy)
     else:
-        consumed_dict[phase][tarif_mode] += energy
+        consumed_dict[phase][tariff_mode] += energy
 
 # ---- Simulation ----
 def simulate_battery_behavior(house_grid_power_watts):
@@ -103,6 +103,7 @@ def simulate_battery_behavior(house_grid_power_watts):
                 charge_power_watts[phase] = min(surplus_watts, max_charge_power_watts[phase])
                 energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts[phase], 1) * battery_charge_efficiency
                 energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
+                energy_in_battery_Wh[phase] = min(energy_in_battery_Wh[phase], battery_capacity_Wh[phase])
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_injected_in_battery_Wh / battery_capacity_Wh[phase] / 2)
                 battery_status[phase] = "charging"
@@ -118,6 +119,7 @@ def simulate_battery_behavior(house_grid_power_watts):
                 # Discharge the battery if not empty
                 energy_to_be_consumed_from_battery_Wh = calculate_energy_Wh(discharge_power_watts[phase], 1) * (1 / battery_discharge_efficiency)
                 energy_in_battery_Wh[phase] -= energy_to_be_consumed_from_battery_Wh
+                energy_in_battery_Wh[phase] = max(0, energy_in_battery_Wh[phase])
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_consumed_from_battery_Wh / battery_capacity_Wh[phase] / 2)
                 battery_status[phase] = "discharging"
@@ -215,105 +217,12 @@ def export_json_report(report, filename="simulation_report.json"):
         json.dump(report, f, indent=2)
     print(f"+ JSON report exported to {filename}")
 
-def build_range_metadata(df):
+def build_range_metadata(df, duration_days):
     return {
         "start_date": df["timestamp"].min().isoformat(),
         "end_date": df["timestamp"].max().isoformat(),
         "number_of_points": len(df),
-        "duration_days": (df["timestamp"].max() - df["timestamp"].min()).days
-    }
-
-def build_results_block(
-    injected_energy,
-    consumed_energy,
-    rentability,
-    battery_statistics,
-    battery_status,
-    power_at_peak
-):
-    """
-    Unified results structure for ALL ranges (global & monthly)
-    """
-    return {
-        "energy": {
-            "injected": injected_energy,
-            "consumed": consumed_energy
-        },
-        "rentability": rentability,
-        "battery_statistics": battery_statistics,
-        "battery_status": battery_status,
-        "power_at_peak": power_at_peak
-    }
-
-def compute_energy_and_rentability_from_df(df):
-    """
-    Compute injected / consumed energy and CHF gain from a dataframe slice
-    """
-
-    injected = {"phase_a": {"HP": 0, "HC": 0},
-                "phase_b": {"HP": 0, "HC": 0},
-                "phase_c": {"HP": 0, "HC": 0}}
-
-    consumed = {"phase_a": {"HP": 0, "HC": 0},
-                "phase_b": {"HP": 0, "HC": 0},
-                "phase_c": {"HP": 0, "HC": 0}}
-
-    for _, row in df.iterrows():
-        tarif = row["tarif_mode"]
-
-        # injected (<0) or consumed (>0)
-        for phase in ["a", "b", "c"]:
-            energy = row[f"simulated_house_consumption_phase_{phase}_Wh"]
-
-            if energy < 0:
-                injected[f"phase_{phase}"][tarif] += abs(energy)
-            else:
-                consumed[f"phase_{phase}"][tarif] += energy
-
-    def to_kwh(x):
-        return int(x / 1000)
-
-    injected_table = []
-    consumed_table = []
-    total_gain_chf = 0
-
-    for phase in ["a", "b", "c"]:
-        for tarif in ["HC", "HP"]:
-            inj_kwh = to_kwh(injected[f"phase_{phase}"][tarif])
-            con_kwh = to_kwh(consumed[f"phase_{phase}"][tarif])
-
-            inj_chf = -get_current_tariff_price(tarif, "inject") * inj_kwh
-            con_chf = get_current_tariff_price(tarif, "consume") * con_kwh
-
-            injected_table.append({
-                "phase": phase.upper(),
-                "tariff": tarif,
-                "energy_kwh": inj_kwh,
-                "delta_chf": r(inj_chf)
-            })
-
-            consumed_table.append({
-                "phase": phase.upper(),
-                "tariff": tarif,
-                "energy_kwh": con_kwh,
-                "delta_chf": r(con_chf)
-            })
-
-            total_gain_chf += inj_chf + con_chf
-
-    duration_days = (df["timestamp"].max() - df["timestamp"].min()).days or 1
-
-    return {
-        "energy": {
-            "injected": injected_table,
-            "consumed": consumed_table
-        },
-        "rentability": {
-            "total_gain_chf": r(total_gain_chf),
-            "annualized_gain_chf": r(total_gain_chf / duration_days * 365),
-            "amortization_years": None,
-            "note": "Monthly slice (amortization is global-only)"
-        }
+        "duration_days": duration_days
     }
 
 def build_battery_statistics(
@@ -384,22 +293,47 @@ def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts)
 def build_canonical_results(
     df,
     battery_cost,
-    number_of_days,
+    duration_days,
     *,
     cycles=None
 ):
-    energy_rent = compute_energy_and_rentability_from_df(df)
+    """
+    Canonical results builder used for ALL ranges (global & monthly)
+
+    - Global:
+        * cycles provided
+        * amortization computed
+        * note = "Global range"
+    - Monthly:
+        * cycles = None
+        * amortization disabled
+        * note = "Delta vs without battery"
+    """
+
+    energy_rent = compute_energy_and_rentability_from_df(df, duration_days)
+
+    annualized_gain = energy_rent["rentability"]["annualized_gain_chf"]
+
+    amortization_years = (
+        round(battery_cost / annualized_gain, 2)
+        if cycles is not None and annualized_gain > 0
+        else None
+    )
 
     return {
         "energy": energy_rent["energy"],
+
         "rentability": {
-            **energy_rent["rentability"],
-            "amortization_years": (
-                round(battery_cost / energy_rent["rentability"]["annualized_gain_chf"], 2)
-                if cycles is not None and energy_rent["rentability"]["annualized_gain_chf"] > 0
-                else None
+            "total_gain_chf": energy_rent["rentability"]["total_gain_chf"],
+            "annualized_gain_chf": annualized_gain,
+            "amortization_years": amortization_years,
+            "note": (
+                "Global range (amortization enabled)"
+                if cycles is not None
+                else "Delta vs without battery (monthly slice)"
             )
         },
+
         "battery": {
             "statistics": build_battery_statistics(
                 df,
@@ -412,6 +346,79 @@ def build_canonical_results(
                 max_charge_power_watts,
                 max_discharge_power_watts
             )
+        }
+    }
+
+def compute_energy_and_rentability_from_df(df, duration_days):
+    """
+    Compute DELTA injected / consumed energy and CHF gain
+    (with battery vs without battery)
+    """
+
+    # Wh accumulators
+    injected_without = {"a": {"HP": 0, "HC": 0}, "b": {"HP": 0, "HC": 0}, "c": {"HP": 0, "HC": 0}}
+    injected_with    = {"a": {"HP": 0, "HC": 0}, "b": {"HP": 0, "HC": 0}, "c": {"HP": 0, "HC": 0}}
+    consumed_without = {"a": {"HP": 0, "HC": 0}, "b": {"HP": 0, "HC": 0}, "c": {"HP": 0, "HC": 0}}
+    consumed_with    = {"a": {"HP": 0, "HC": 0}, "b": {"HP": 0, "HC": 0}, "c": {"HP": 0, "HC": 0}}
+
+    for _, row in df.iterrows():
+        tarif = row["tariff_mode"]
+
+        for phase in ["a", "b", "c"]:
+            no_batt = row[f"house_consumption_phase_{phase}_Wh"]
+            with_batt = row[f"simulated_house_consumption_phase_{phase}_Wh"]
+
+            if no_batt < 0:
+                injected_without[phase][tarif] += abs(no_batt)
+            else:
+                consumed_without[phase][tarif] += no_batt
+
+            if with_batt < 0:
+                injected_with[phase][tarif] += abs(with_batt)
+            else:
+                consumed_with[phase][tarif] += with_batt
+
+    def wh_to_kwh(x):
+        return round(x / 1000, 3)
+
+    injected_table = []
+    consumed_table = []
+    total_gain_chf = 0.0
+
+    for phase in ["a", "b", "c"]:
+        for tarif in ["HC", "HP"]:
+            inj_delta_kwh = wh_to_kwh(injected_with[phase][tarif] - injected_without[phase][tarif])
+            con_delta_kwh = wh_to_kwh(consumed_with[phase][tarif] - consumed_without[phase][tarif])
+
+            inj_chf = -get_current_tariff_price(tarif, "inject") * inj_delta_kwh
+            con_chf =  get_current_tariff_price(tarif, "consume") * con_delta_kwh
+
+            injected_table.append({
+                "phase": phase.upper(),
+                "tariff": tarif,
+                "energy_kwh": inj_delta_kwh,
+                "delta_chf": r(inj_chf)
+            })
+
+            consumed_table.append({
+                "phase": phase.upper(),
+                "tariff": tarif,
+                "energy_kwh": con_delta_kwh,
+                "delta_chf": r(con_chf)
+            })
+
+            total_gain_chf += inj_chf + con_chf
+
+    return {
+        "energy": {
+            "injected": injected_table,
+            "consumed": consumed_table
+        },
+        "rentability": {
+            "total_gain_chf": r(total_gain_chf),
+            "annualized_gain_chf": r(total_gain_chf / duration_days * 365),
+            "amortization_years": None,
+            "note": "Delta vs without battery"
         }
     }
 
@@ -558,7 +565,10 @@ merged_data_quantity = len(merged_data)
 print(f"+ Merged - Timestamp: {merged_start_timestamp} to {merged_end_timestamp} with {merged_data_quantity} lines")
 
 # Number of days to process
-number_of_data_days = (merged_end_timestamp - merged_start_timestamp).days
+duration_days_global = max(
+    1,
+    (merged_end_timestamp - merged_start_timestamp).days
+)
 
 print("Starting simulation...")
 # ---- Execution on the data from the CSV files ----
@@ -574,7 +584,11 @@ current_consumed_energy_Wh = {"phase_a": {"HP": 0, "HC": 0}, "phase_b": {"HP": 0
 for i in range(len(merged_data)):
     # Print progress bar
     progress = (i + 1) / len(merged_data) * 100
-    sys.stdout.write(f"\r+ Progress: [{int(progress) * '#'}{(100 - int(progress)) * ' '}] {progress:.2f}%")
+    bar_width = 40
+    filled = int(progress / 100 * bar_width)
+    sys.stdout.write(
+        f"\r+ Progress: [{'#' * filled}{' ' * (bar_width - filled)}] {progress:.2f}%"
+    )
     sys.stdout.flush()
 
     # Get the current timestamp, weekday and hour
@@ -583,7 +597,7 @@ for i in range(len(merged_data)):
     hour = timestamp.hour
 
     # Get the current tarif mode
-    tarif_mode = get_current_tarif_mode(hour, weekday)
+    tariff_mode = get_current_tariff_mode(hour, weekday)
 
     # Statistics without the battery
     house_consumption_watts = [merged_data.iloc[i][f"phase_{phase}"] for phase in ["a", "b", "c"]]
@@ -615,7 +629,7 @@ for i in range(len(merged_data)):
         energy_house_consumption_Wh_phase_b,
         energy_house_consumption_Wh_phase_c
     ]):
-        update_energy(energy, tarif_mode, current_consumed_energy_Wh, current_injected_energy_Wh, phase)
+        update_energy(energy, tariff_mode, current_consumed_energy_Wh, current_injected_energy_Wh, phase)
 
     # Process simulated energy consumption
     for phase, energy in zip(phases, [
@@ -623,12 +637,12 @@ for i in range(len(merged_data)):
         simulated_energy_house_consumption_Wh_phase_b,
         simulated_energy_house_consumption_Wh_phase_c
     ]):
-        update_energy(energy, tarif_mode, simulated_consumed_energy_Wh, simulated_injected_energy_Wh, phase)
+        update_energy(energy, tariff_mode, simulated_consumed_energy_Wh, simulated_injected_energy_Wh, phase)
 
     # Export all info in a csv file
     results.append({
         "timestamp": timestamp,
-        "tarif_mode": tarif_mode,
+        "tariff_mode": tariff_mode,
         "house_consumption_phase_a_Wh": energy_house_consumption_Wh_phase_a,
         "house_consumption_phase_b_Wh": energy_house_consumption_Wh_phase_b,
         "house_consumption_phase_c_Wh": energy_house_consumption_Wh_phase_c,
@@ -704,15 +718,45 @@ print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
 
 print("")
 print("Rentability:")
-print(f"+ Total gain: {total_gain_CHF} CHF for {number_of_data_days} days or per year: {total_gain_CHF / number_of_data_days * 365:.0f} CHF (extrapolated)")
-print(f"+ Amortization time: {battery_cost / total_gain_CHF * number_of_data_days / 365:.2f} years if the cost of the battery is {battery_cost} CHF")
+print(f"+ Total gain: {total_gain_CHF} CHF for {duration_days_global} days or per year: {total_gain_CHF / duration_days_global * 365:.0f} CHF (extrapolated)")
+if total_gain_CHF > 0:
+    print(
+        f"+ Amortization time: "
+        f"{battery_cost / total_gain_CHF * duration_days_global / 365:.2f} years "
+        f"if the cost of the battery is {battery_cost} CHF"
+    )
+else:
+    print("+ Amortization time: not applicable (no financial gain)")
+
 
 print("")
 # Battery statistics
+def expected_life(cycles):
+    return (
+        int(battery_max_cycles / cycles * duration_days_global / 365)
+        if cycles > 0
+        else None
+    )
+
 battery_stats_data = [
-    ["Cycles", int(battery_cycle_total['phase1']), int(battery_cycle_total['phase2']), int(battery_cycle_total['phase3']), battery_max_cycles],
-    ["Expected life (years)", int(battery_max_cycles / battery_cycle_total['phase1'] * number_of_data_days / 365), int(battery_max_cycles / battery_cycle_total['phase2'] * number_of_data_days / 365), int(battery_max_cycles / battery_cycle_total['phase3'] * number_of_data_days / 365), ""],
-    ["Remaining energy (Wh)", int(energy_in_battery_Wh[0]), int(energy_in_battery_Wh[1]), int(energy_in_battery_Wh[2]), ""]
+    ["Cycles",
+     int(battery_cycle_total['phase1']),
+     int(battery_cycle_total['phase2']),
+     int(battery_cycle_total['phase3']),
+     battery_max_cycles
+    ],
+    ["Expected life (years)",
+     expected_life(battery_cycle_total['phase1']),
+     expected_life(battery_cycle_total['phase2']),
+     expected_life(battery_cycle_total['phase3']),
+     ""
+    ],
+    ["Remaining energy (Wh)",
+     int(energy_in_battery_Wh[0]),
+     int(energy_in_battery_Wh[1]),
+     int(energy_in_battery_Wh[2]),
+     ""
+    ]
 ]
 
 headers = ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"]
@@ -772,13 +816,73 @@ battery_discharging_not_max_power_phase1 = results_df[(results_df["discharge_pow
 battery_discharging_not_max_power_phase2 = results_df[(results_df["discharge_power_phase2_W"] != max_discharge_power_watts[1]) & (results_df["discharge_power_phase2_W"] != 0)].shape[0]
 battery_discharging_not_max_power_phase3 = results_df[(results_df["discharge_power_phase3_W"] != max_discharge_power_watts[2]) & (results_df["discharge_power_phase3_W"] != 0)].shape[0]
 
+def pct(part, total):
+    return f"{(part / total * 100):.2f}%" if total > 0 else "n/a"
+
 # Create a table for charging and discharging power at the peak
 charging_discharging_power_data = [
-    ["Charging at Max Power", f"{battery_charging_max_power_phase1} ({battery_charging_max_power_phase1 / (battery_charging_max_power_phase1 + battery_charging_not_max_power_phase1) * 100:.2f}%)", f"{battery_charging_max_power_phase2} ({battery_charging_max_power_phase2 / (battery_charging_max_power_phase2 + battery_charging_not_max_power_phase2) * 100:.2f}%)", f"{battery_charging_max_power_phase3} ({battery_charging_max_power_phase3 / (battery_charging_max_power_phase3 + battery_charging_not_max_power_phase3) * 100:.2f}%)"],
-    ["Charging Not at Max Power", f"{battery_charging_not_max_power_phase1} ({battery_charging_not_max_power_phase1 / (battery_charging_max_power_phase1 + battery_charging_not_max_power_phase1) * 100:.2f}%)", f"{battery_charging_not_max_power_phase2} ({battery_charging_not_max_power_phase2 / (battery_charging_max_power_phase2 + battery_charging_not_max_power_phase2) * 100:.2f}%)", f"{battery_charging_not_max_power_phase3} ({battery_charging_not_max_power_phase3 / (battery_charging_max_power_phase3 + battery_charging_not_max_power_phase3) * 100:.2f}%)"],
-    ["Discharging at Max Power", f"{battery_discharging_max_power_phase1} ({battery_discharging_max_power_phase1 / (battery_discharging_max_power_phase1 + battery_discharging_not_max_power_phase1) * 100:.2f}%)", f"{battery_discharging_max_power_phase2} ({battery_discharging_max_power_phase2 / (battery_discharging_max_power_phase2 + battery_discharging_not_max_power_phase2) * 100:.2f}%)", f"{battery_discharging_max_power_phase3} ({battery_discharging_max_power_phase3 / (battery_discharging_max_power_phase3 + battery_discharging_not_max_power_phase3) * 100:.2f}%)"],
-    ["Discharging Not at Max Power", f"{battery_discharging_not_max_power_phase1} ({battery_discharging_not_max_power_phase1 / (battery_discharging_max_power_phase1 + battery_discharging_not_max_power_phase1) * 100:.2f}%)", f"{battery_discharging_not_max_power_phase2} ({battery_discharging_not_max_power_phase2 / (battery_discharging_max_power_phase2 + battery_discharging_not_max_power_phase2) * 100:.2f}%)", f"{battery_discharging_not_max_power_phase3} ({battery_discharging_not_max_power_phase3 / (battery_discharging_max_power_phase3 + battery_discharging_not_max_power_phase3) * 100:.2f}%)"]
+    [
+        "Charging at Max Power",
+        pct(
+            battery_charging_max_power_phase1,
+            battery_charging_max_power_phase1 + battery_charging_not_max_power_phase1
+        ),
+        pct(
+            battery_charging_max_power_phase2,
+            battery_charging_max_power_phase2 + battery_charging_not_max_power_phase2
+        ),
+        pct(
+            battery_charging_max_power_phase3,
+            battery_charging_max_power_phase3 + battery_charging_not_max_power_phase3
+        ),
+    ],
+    [
+        "Charging Not at Max Power",
+        pct(
+            battery_charging_not_max_power_phase1,
+            battery_charging_max_power_phase1 + battery_charging_not_max_power_phase1
+        ),
+        pct(
+            battery_charging_not_max_power_phase2,
+            battery_charging_max_power_phase2 + battery_charging_not_max_power_phase2
+        ),
+        pct(
+            battery_charging_not_max_power_phase3,
+            battery_charging_max_power_phase3 + battery_charging_not_max_power_phase3
+        ),
+    ],
+    [
+        "Discharging at Max Power",
+        pct(
+            battery_discharging_max_power_phase1,
+            battery_discharging_max_power_phase1 + battery_discharging_not_max_power_phase1
+        ),
+        pct(
+            battery_discharging_max_power_phase2,
+            battery_discharging_max_power_phase2 + battery_discharging_not_max_power_phase2
+        ),
+        pct(
+            battery_discharging_max_power_phase3,
+            battery_discharging_max_power_phase3 + battery_discharging_not_max_power_phase3
+        ),
+    ],
+    [
+        "Discharging Not at Max Power",
+        pct(
+            battery_discharging_not_max_power_phase1,
+            battery_discharging_max_power_phase1 + battery_discharging_not_max_power_phase1
+        ),
+        pct(
+            battery_discharging_not_max_power_phase2,
+            battery_discharging_max_power_phase2 + battery_discharging_not_max_power_phase2
+        ),
+        pct(
+            battery_discharging_not_max_power_phase3,
+            battery_discharging_max_power_phase3 + battery_discharging_not_max_power_phase3
+        ),
+    ],
 ]
+
 headers = ["Metric", "Phase 1", "Phase 2", "Phase 3"]
 
 print("")
@@ -805,11 +909,11 @@ ranges = []
 ranges.append({
     "range_id": "global",
     "range_type": "global",
-    "range": build_range_metadata(results_df),
+    "range": build_range_metadata(results_df, duration_days_global),
     "results": build_canonical_results(
         results_df,
         battery_cost,
-        number_of_data_days,
+        duration_days_global,
         cycles=battery_cycles_global
     )
 })
@@ -819,18 +923,19 @@ results_df["year"] = results_df["timestamp"].dt.year
 results_df["month"] = results_df["timestamp"].dt.month
 
 for (year, month), df_month in results_df.groupby(["year", "month"]):
-    number_of_days = max(
+    duration_days_month = max(
         1,
         (df_month["timestamp"].max() - df_month["timestamp"].min()).days
     )
+
     ranges.append({
         "range_id": f"{year}-{month:02d}",
         "range_type": "monthly",
-        "range": build_range_metadata(df_month),
+        "range": build_range_metadata(df_month, duration_days_month),
         "results": build_canonical_results(
             df_month,
             battery_cost,
-            number_of_days,
+            duration_days_month,
             cycles=None
         )
     })
