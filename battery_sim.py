@@ -258,7 +258,7 @@ def compute_aggregates_from_df(
             count = int((df[col] == status).sum())
             out[status] = {
                 "count": count,
-                "percent": round(count / total * 100, 2)
+                "percent": r(count / total * 100)
             }
         return out
 
@@ -297,10 +297,18 @@ def compute_aggregates_from_df(
         }
     }
 
-    return {
-        "battery_status": battery_status,
-        "power_at_peak": power_at_peak
-    }
+    energy_and_rentability = compute_energy_and_rentability_from_df(df)
+
+    return build_results_block(
+        injected_energy=energy_and_rentability["energy"]["injected"],
+        consumed_energy=energy_and_rentability["energy"]["consumed"],
+        rentability=energy_and_rentability["rentability"],
+        battery_statistics={
+            "cycles": cycles
+        },
+        battery_status=battery_status,
+        power_at_peak=power_at_peak
+    )
 
 def build_range_metadata(df):
     return {
@@ -310,6 +318,190 @@ def build_range_metadata(df):
         "duration_days": (df["timestamp"].max() - df["timestamp"].min()).days
     }
 
+def build_results_block(
+    injected_energy,
+    consumed_energy,
+    rentability,
+    battery_statistics,
+    battery_status,
+    power_at_peak
+):
+    """
+    Unified results structure for ALL ranges (global & monthly)
+    """
+    return {
+        "energy": {
+            "injected": injected_energy,
+            "consumed": consumed_energy
+        },
+        "rentability": rentability,
+        "battery_statistics": battery_statistics,
+        "battery_status": battery_status,
+        "power_at_peak": power_at_peak
+    }
+
+def compute_energy_and_rentability_from_df(df):
+    """
+    Compute injected / consumed energy and CHF gain from a dataframe slice
+    """
+
+    injected = {"phase_a": {"HP": 0, "HC": 0},
+                "phase_b": {"HP": 0, "HC": 0},
+                "phase_c": {"HP": 0, "HC": 0}}
+
+    consumed = {"phase_a": {"HP": 0, "HC": 0},
+                "phase_b": {"HP": 0, "HC": 0},
+                "phase_c": {"HP": 0, "HC": 0}}
+
+    for _, row in df.iterrows():
+        tarif = row["tarif_mode"]
+
+        # injected (<0) or consumed (>0)
+        for phase in ["a", "b", "c"]:
+            energy = row[f"simulated_house_consumption_phase_{phase}_Wh"]
+
+            if energy < 0:
+                injected[f"phase_{phase}"][tarif] += abs(energy)
+            else:
+                consumed[f"phase_{phase}"][tarif] += energy
+
+    def to_kwh(x):
+        return int(x / 1000)
+
+    injected_table = []
+    consumed_table = []
+    total_gain_chf = 0
+
+    for phase in ["a", "b", "c"]:
+        for tarif in ["HC", "HP"]:
+            inj_kwh = to_kwh(injected[f"phase_{phase}"][tarif])
+            con_kwh = to_kwh(consumed[f"phase_{phase}"][tarif])
+
+            inj_chf = -get_current_tariff_price(tarif, "inject") * inj_kwh
+            con_chf = get_current_tariff_price(tarif, "consume") * con_kwh
+
+            injected_table.append({
+                "phase": phase.upper(),
+                "tariff": tarif,
+                "energy_kwh": inj_kwh,
+                "delta_chf": r(inj_chf)
+            })
+
+            consumed_table.append({
+                "phase": phase.upper(),
+                "tariff": tarif,
+                "energy_kwh": con_kwh,
+                "delta_chf": r(con_chf)
+            })
+
+            total_gain_chf += inj_chf + con_chf
+
+    duration_days = (df["timestamp"].max() - df["timestamp"].min()).days or 1
+
+    return {
+        "energy": {
+            "injected": injected_table,
+            "consumed": consumed_table
+        },
+        "rentability": {
+            "total_gain_chf": r(total_gain_chf),
+            "annualized_gain_chf": r(total_gain_chf / duration_days * 365),
+            "amortization_years": None,
+            "note": "Monthly slice (amortization is global-only)"
+        }
+    }
+
+def compute_battery_statistics(df, battery_max_cycles):
+    cycles = {
+        "phase1": int(round(df["battery_energy_phase1_Wh"].diff().abs().sum())),
+        "phase2": int(round(df["battery_energy_phase2_Wh"].diff().abs().sum())),
+        "phase3": int(round(df["battery_energy_phase3_Wh"].diff().abs().sum()))
+    }
+
+    return {
+        "cycles": cycles,
+        "max_cycles": battery_max_cycles,
+        "remaining_energy_Wh": {
+            "phase1": r(df["battery_energy_phase1_Wh"].iloc[-1], 1),
+            "phase2": r(df["battery_energy_phase2_Wh"].iloc[-1], 1),
+            "phase3": r(df["battery_energy_phase3_Wh"].iloc[-1], 1)
+        }
+    }
+
+def compute_battery_status(df):
+    def stats(col):
+        total = len(df)
+        return {
+            status: {
+                "count": int((df[col] == status).sum()),
+                "percent": round((df[col] == status).sum() / total * 100, 2)
+            }
+            for status in ["full", "empty", "charging", "discharging"]
+        }
+
+    return {
+        "phase1": stats("battery_status_phase1"),
+        "phase2": stats("battery_status_phase2"),
+        "phase3": stats("battery_status_phase3"),
+        "total_samples": len(df)
+    }
+
+def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts):
+    def power_stats(col, max_power):
+        total = len(df[df[col] != 0])
+        if total == 0:
+            return {"at_max": None, "not_at_max": None}
+
+        at_max = (df[col] == max_power).sum()
+        return {
+            "at_max": {
+                "count": int(at_max),
+                "percent": round(at_max / total * 100, 2)
+            },
+            "not_at_max": {
+                "count": int(total - at_max),
+                "percent": round((total - at_max) / total * 100, 2)
+            }
+        }
+
+    return {
+        "charging": {
+            "phase1": power_stats("charge_power_phase1_W", max_charge_power_watts[0]),
+            "phase2": power_stats("charge_power_phase2_W", max_charge_power_watts[1]),
+            "phase3": power_stats("charge_power_phase3_W", max_charge_power_watts[2])
+        },
+        "discharging": {
+            "phase1": power_stats("discharge_power_phase1_W", max_discharge_power_watts[0]),
+            "phase2": power_stats("discharge_power_phase2_W", max_discharge_power_watts[1]),
+            "phase3": power_stats("discharge_power_phase3_W", max_discharge_power_watts[2])
+        }
+    }
+
+def build_canonical_results(df, battery_cost, number_of_days):
+    energy_rent = compute_energy_and_rentability_from_df(df)
+
+    return {
+        "energy": energy_rent["energy"],
+        "rentability": {
+            **energy_rent["rentability"],
+            "amortization_years": (
+                round(battery_cost / energy_rent["rentability"]["annualized_gain_chf"], 2)
+                if energy_rent["rentability"]["annualized_gain_chf"] > 0
+                else None
+            )
+        },
+        "battery": {
+            "statistics": compute_battery_statistics(df, battery_max_cycles),
+            "status": compute_battery_status(df),
+            "power_at_peak": compute_power_at_peak(
+                df,
+                max_charge_power_watts,
+                max_discharge_power_watts
+            )
+        }
+    }
+def r(x, digits=2):
+    return round(x, digits)
 
 ###################################################################
 # MAIN
@@ -685,6 +877,11 @@ if args.export_csv:
     print(f"+ CSV simulation results exported to {args.export_csv}")
 
 # ===============================
+# GLOBAL AGGREGATES (ONCE)
+# ===============================
+global_energy_and_rentability = compute_energy_and_rentability_from_df(results_df)
+
+# ===============================
 # BUILD SIMULATION RANGES
 # ===============================
 ranges = []
@@ -692,19 +889,13 @@ ranges = []
 # ---- Global range ----
 ranges.append({
     "range_id": "global",
+    "range_type": "global",
     "range": build_range_metadata(results_df),
-    "results": {
-        "injected_energy": data_injected,
-        "consumed_energy": data_consumed,
-        "rentability": {
-            "total_gain_chf": total_gain_CHF,
-            "annualized_gain_chf": total_gain_CHF / number_of_data_days * 365,
-            "amortization_years": battery_cost / total_gain_CHF * number_of_data_days / 365
-        },
-        "battery_statistics": battery_stats_data,
-        "battery_status": battery_status_data,
-        "power_at_peak": charging_discharging_power_data
-    }
+    "results": build_canonical_results(
+        results_df,
+        battery_cost,
+        number_of_data_days
+    )
 })
 
 # ---- Monthly ranges ----
@@ -714,12 +905,12 @@ results_df["month"] = results_df["timestamp"].dt.month
 for (year, month), df_month in results_df.groupby(["year", "month"]):
     ranges.append({
         "range_id": f"{year}-{month:02d}",
+        "range_type": "monthly",
         "range": build_range_metadata(df_month),
-        "results": compute_aggregates_from_df(
+        "results": build_canonical_results(
             df_month,
             battery_cost,
-            max_charge_power_watts,
-            max_discharge_power_watts
+            number_of_data_days
         )
     })
 
