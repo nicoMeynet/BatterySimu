@@ -233,6 +233,7 @@ def build_battery_statistics(
 ):
     return {
         "cycles": cycles,
+        "cycle_definition": "1.0 = full charge + discharge",
         "cycles_scope": "global_only" if cycles is not None else "not_applicable",
         "max_cycles": battery_max_cycles,
         "remaining_energy_Wh": {
@@ -316,15 +317,21 @@ def build_canonical_results(
         * note = "Delta vs without battery"
     """
 
-    energy_rent = compute_energy_and_rentability_from_df(df, duration_days)
+    energy_rent = compute_energy_and_rentability_from_df(df)
 
-    annualized_gain = energy_rent["rentability"]["annualized_gain_chf"]
-    if duration_days < 7:
-        annualized_gain = None
+    total_gain = energy_rent["rentability"]["total_gain_chf"]
+
+    annualized_gain = (
+        r(total_gain / duration_days * 365)
+        if duration_days >= 7
+        else None
+    )
 
     amortization_years = (
-        round(battery_cost / annualized_gain, 2)
-        if cycles is not None and annualized_gain > 0
+        r(battery_cost / annualized_gain)
+        if cycles is not None
+        and annualized_gain is not None
+        and annualized_gain > 0
         else None
     )
 
@@ -358,7 +365,7 @@ def build_canonical_results(
         }
     }
 
-def compute_energy_and_rentability_from_df(df, duration_days):
+def compute_energy_and_rentability_from_df(df):
     """
     Compute DELTA injected / consumed energy and CHF gain
     (with battery vs without battery)
@@ -418,13 +425,6 @@ def compute_energy_and_rentability_from_df(df, duration_days):
 
             total_gain_chf += inj_chf + con_chf
 
-    annualized = (
-        r(total_gain_chf / duration_days * 365)
-        if duration_days > 0
-        else None
-    )
-
-
     return {
         "energy": {
             "unit": "kWh",
@@ -434,7 +434,7 @@ def compute_energy_and_rentability_from_df(df, duration_days):
         },
         "rentability": {
             "total_gain_chf": r(total_gain_chf),
-            "annualized_gain_chf": annualized,
+            "annualized_gain_chf": None,
             "amortization_years": None,
             "note": "Delta vs without battery"
         }
@@ -923,9 +923,6 @@ if args.export_csv:
     results_df.to_csv(args.export_csv, index=False)
     print(f"+ CSV simulation results exported to {args.export_csv}")
 
-# ===============================
-# BUILD SIMULATION RANGES
-# ===============================
 # ===============================
 # BUILD SIMULATION RANGES
 # ===============================
