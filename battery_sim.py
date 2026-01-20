@@ -323,7 +323,7 @@ def build_canonical_results(
 
     annualized_gain = (
         r(total_gain / duration_days * 365)
-        if duration_days >= 7
+        if cycles is not None and duration_days >= 7
         else None
     )
 
@@ -343,6 +343,7 @@ def build_canonical_results(
             "annualized_gain_chf": annualized_gain,
             "annualization_method": "linear_extrapolation",
             "amortization_years": amortization_years,
+            "profitable": energy_rent["rentability"]["total_gain_chf"] > 0,
             "note": (
                 "Global range (amortization enabled)"
                 if cycles is not None
@@ -355,6 +356,11 @@ def build_canonical_results(
                 df,
                 cycles=cycles,
                 battery_max_cycles=battery_max_cycles
+            ),
+            "utilization": compute_battery_utilization(
+                cycles,
+                duration_days,
+                battery_max_cycles
             ),
             "status": compute_battery_status(df),
             "power_at_peak": compute_power_at_peak(
@@ -452,6 +458,20 @@ def print_progress_bar(current, total, prefix="Progress"):
         f"\r+ {prefix}: [{'#' * filled}{' ' * (bar_width - filled)}] {percent:.2f}%"
     )
     sys.stdout.flush()
+
+def compute_battery_utilization(cycles, duration_days, max_cycles):
+    if cycles is None or duration_days <= 0:
+        return None
+
+    avg_cycles = sum(cycles.values()) / len(cycles)
+
+    return {
+        "cycles_per_year": r(avg_cycles / duration_days * 365, 1),
+        "percent_of_max_cycles_per_year": r(
+            (avg_cycles / duration_days * 365) / max_cycles * 100,
+            2
+        )
+    }
 
 ###################################################################
 # MAIN
@@ -939,6 +959,7 @@ total_ranges = 1 + len(monthly_groups)  # global + monthly
 
 # ---- Global range ----
 ranges.append({
+    "range_index": range_index,
     "range_id": "global",
     "range_type": "global",
     "range": build_range_metadata(results_df, duration_days_global),
@@ -961,6 +982,7 @@ for (year, month), df_month in monthly_groups:
     )
 
     ranges.append({
+        "range_index": range_index,
         "range_id": f"{year}-{month:02d}",
         "range_type": "monthly",
         "range": build_range_metadata(df_month, duration_days_month),
