@@ -225,7 +225,7 @@ def build_range_metadata(df, duration_days):
     return {
         "start_date": df["timestamp"].min().isoformat(),
         "end_date": df["timestamp"].max().isoformat(),
-        "number_of_points": len(df),
+        "samples_analyzed": len(df),
         "duration_days": duration_days
     }
 
@@ -251,8 +251,8 @@ def compute_battery_status(df):
         total = len(df)
         return {
             status: {
-                "count": int((df[col] == status).sum()),
-                "percent": round((df[col] == status).sum() / total * 100, 2)
+                "sample_count": int((df[col] == status).sum()),
+                "samples_percent": round((df[col] == status).sum() / total * 100, 2)
             }
             for status in ["full", "empty", "charging", "discharging"]
         }
@@ -261,7 +261,7 @@ def compute_battery_status(df):
         phase: stats(f"battery_status_phase_{phase}")
         for phase in PHASE_KEYS
     } | {
-        "total_samples": len(df)
+        "samples_analyzed": len(df)
     }
 
 def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts):
@@ -270,20 +270,20 @@ def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts)
         if total == 0:
             return {
                 "data_available": False,
-                "at_max": {"count": 0, "percent": 0.0},
-                "not_at_max": {"count": 0, "percent": 0.0}
+                "at_max": {"sample_count": 0, "samples_percent": 0.0},
+                "not_at_max": {"sample_count": 0, "samples_percent": 0.0}
             }
 
         at_max = (df[col] == max_power).sum()
         return {
             "data_available": True,
             "at_max": {
-                "count": int(at_max),
-                "percent": round(at_max / total * 100, 2)
+                "sample_count": int(at_max),
+                "samples_percent": round(at_max / total * 100, 2)
             },
             "not_at_max": {
-                "count": int(total - at_max),
-                "percent": round((total - at_max) / total * 100, 2)
+                "sample_count": int(total - at_max),
+                "samples_percent": round((total - at_max) / total * 100, 2)
             }
         }
 
@@ -351,7 +351,6 @@ def build_canonical_results(
             "annualized_gain_chf": annualized_gain if is_global else None,
             "annualization_method": "linear_extrapolation" if is_global else None,
             "amortization_years": amortization_years if is_global else None,
-            "profitable": (energy_rent["rentability"]["total_gain_chf"] > 0) if is_global else None,
             "note": (
                 "Global range (amortization enabled)"
                 if is_global
@@ -436,27 +435,27 @@ def compute_energy_and_rentability_from_df(df):
 
             # For the per-row delta_chf you can keep "magnitude only" if you want:
             injected_table.append({
-                "phase": phase.upper(),
+                "phase": phase,
                 "tariff": tarif,
-                "energy_kwh": inj_delta_kwh,                       # signed
-                "delta_chf": r(abs(inj_chf_signed)),               # magnitude
-                "financial_effect": financial_effect_from_energy(inj_delta_kwh)
+                "energy_kwh": inj_delta_kwh,
+                "delta_chf": r(abs(inj_chf_signed)),
+                "financial_effect": financial_effect(inj_delta_kwh, "injected")
             })
 
             consumed_table.append({
-                "phase": phase.upper(),
+                "phase": phase,
                 "tariff": tarif,
-                "energy_kwh": con_delta_kwh,                       # signed
-                "delta_chf": r(abs(gain_from_consumption)),        # magnitude (already "gain space")
-                "financial_effect": financial_effect_from_energy(con_delta_kwh)
+                "energy_kwh": con_delta_kwh,
+                "delta_chf": r(abs(con_chf_signed)),
+                "financial_effect": financial_effect(con_delta_kwh, "consumed")
             })
 
     return {
         "energy": {
             "conventions": {
-                "energy_kwh": "negative values indicate reduction compared to no battery",
-                "delta_chf": "absolute financial impact (CHF), magnitude only",
-                "financial_effect": "gain | loss | neutral, derived from energy_kwh sign"
+            "energy_kwh": "signed delta relative to no-battery baseline",
+            "delta_chf": "absolute financial impact (CHF)",
+            "financial_effect": "gain | loss | neutral depending on energy sign and category (consumed vs injected)"
             },
             "injected": injected_table,
             "consumed": consumed_table
@@ -543,6 +542,21 @@ def financial_effect_from_energy(delta_kwh: float) -> str:
 def r(x, digits=2, eps=1e-2):
     v = round(x, digits)
     return 0.0 if abs(v) < eps else v
+
+def financial_effect(delta_kwh: float, category: str) -> str:
+    """
+    category: 'consumed' or 'injected'
+    """
+    if delta_kwh == 0:
+        return "neutral"
+
+    if category == "consumed":
+        return "gain" if delta_kwh < 0 else "loss"
+
+    if category == "injected":
+        return "gain" if delta_kwh > 0 else "loss"
+
+    raise ValueError(f"Unknown category: {category}")
 
 ###################################################################
 # MAIN
