@@ -342,22 +342,22 @@ def build_canonical_results(
         else None
     )
 
+    is_global = cycles is not None
+
     return {
         "energy": energy_rent["energy"],
-
         "rentability": {
             "total_gain_chf": energy_rent["rentability"]["total_gain_chf"],
-            "annualized_gain_chf": annualized_gain,
-            "annualization_method": "linear_extrapolation",
-            "amortization_years": amortization_years,
-            "profitable": energy_rent["rentability"]["total_gain_chf"] > 0,
+            "annualized_gain_chf": annualized_gain if is_global else None,
+            "annualization_method": "linear_extrapolation" if is_global else None,
+            "amortization_years": amortization_years if is_global else None,
+            "profitable": (energy_rent["rentability"]["total_gain_chf"] > 0) if is_global else None,
             "note": (
                 "Global range (amortization enabled)"
-                if cycles is not None
+                if is_global
                 else "Delta vs without battery (monthly slice)"
             )
         },
-
         "battery": {
             "statistics": build_battery_statistics(
                 df,
@@ -421,43 +421,54 @@ def compute_energy_and_rentability_from_df(df):
             inj_delta_kwh = wh_to_kwh(injected_with[phase][tarif] - injected_without[phase][tarif])
             con_delta_kwh = wh_to_kwh(consumed_with[phase][tarif] - consumed_without[phase][tarif])
 
-            inj_chf = get_current_tariff_price(tarif, "inject") * inj_delta_kwh
-            con_chf = get_current_tariff_price(tarif, "consume") * con_delta_kwh
+            inject_price = get_current_tariff_price(tarif, "inject")
+            consume_price = get_current_tariff_price(tarif, "consume")
 
+            # Signed CHF impacts
+            inj_chf_signed = inject_price * inj_delta_kwh          # if inject less => negative (lost revenue)
+            con_chf_signed = consume_price * con_delta_kwh         # if consume less => negative (saved cost)
+
+            # Gain convention: positive = good for you
+            gain_from_injection = inj_chf_signed                   # revenue delta
+            gain_from_consumption = -con_chf_signed                # saved cost = negative delta cost => positive gain
+
+            total_gain_chf += gain_from_injection + gain_from_consumption
+
+            # For the per-row delta_chf you can keep "magnitude only" if you want:
             injected_table.append({
                 "phase": phase.upper(),
                 "tariff": tarif,
-                "energy_kwh": inj_delta_kwh,
-                "delta_chf": r(inj_chf)
+                "energy_kwh": inj_delta_kwh,                       # signed
+                "delta_chf": r(abs(inj_chf_signed)),               # magnitude
+                "financial_effect": financial_effect_from_energy(inj_delta_kwh)
             })
 
             consumed_table.append({
                 "phase": phase.upper(),
                 "tariff": tarif,
-                "energy_kwh": con_delta_kwh,
-                "delta_chf": r(con_chf)
+                "energy_kwh": con_delta_kwh,                       # signed
+                "delta_chf": r(abs(gain_from_consumption)),        # magnitude (already "gain space")
+                "financial_effect": financial_effect_from_energy(con_delta_kwh)
             })
-
-            total_gain_chf += inj_chf - con_chf
 
     return {
         "energy": {
-            "unit": "kWh",
-            "sign_convention": "negative = reduction vs without battery",
+            "conventions": {
+                "energy_kwh": "negative values indicate reduction compared to no battery",
+                "delta_chf": "absolute financial impact (CHF), magnitude only",
+                "financial_effect": "gain | loss | neutral, derived from energy_kwh sign"
+            },
             "injected": injected_table,
             "consumed": consumed_table
         },
         "rentability": {
             "total_gain_chf": r(total_gain_chf),
+            "annualization_method": None,
             "annualized_gain_chf": None,
             "amortization_years": None,
             "note": "Delta vs without battery"
         }
     }
-
-def r(x, digits=2):
-    v = round(x, digits)
-    return 0.0 if abs(v) < 1e-9 else v
 
 def print_progress_bar(current, total, prefix="Progress"):
     percent = current / total * 100
@@ -521,6 +532,17 @@ def compute_expected_life_years_per_phase(cycles: dict, max_cycles: float):
 
 def empty_energy_dict():
     return {p: {"HP": 0, "HC": 0} for p in PHASE_KEYS}
+
+def financial_effect_from_energy(delta_kwh: float) -> str:
+    if delta_kwh < 0:
+        return "gain"
+    elif delta_kwh > 0:
+        return "loss"
+    return "neutral"
+
+def r(x, digits=2, eps=1e-2):
+    v = round(x, digits)
+    return 0.0 if abs(v) < eps else v
 
 ###################################################################
 # MAIN
