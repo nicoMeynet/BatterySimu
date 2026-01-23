@@ -12,8 +12,10 @@ import sys
 from tabulate import tabulate
 import json
 import hashlib
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timezone
 from statistics import mean, stdev
+import calendar
+
 
 ###################################################################
 # CONFIGURATION
@@ -213,7 +215,7 @@ def build_json_report(simulation_ranges, seasonal_profitability=None):
         "configuration_hash": configuration_hash,
 
         "simulation": {
-            "ranges": simulation_ranges,
+            "ranges": strip_internal_fields_for_json(simulation_ranges),
             "seasonal_profitability": seasonal_profitability
         }
     }
@@ -243,7 +245,7 @@ def build_battery_statistics(
         "cycles_scope": "global_only" if cycles is not None else "not_applicable",
         "max_cycles": battery_max_cycles,
         "remaining_energy_Wh": {
-            phase: r(df[f"battery_energy_phase_{phase}_Wh"].iloc[-1], 1)
+            phase: round_value(df[f"battery_energy_phase_{phase}_Wh"].iloc[-1], 1)
             for phase in PHASE_KEYS
         }
     }
@@ -331,13 +333,13 @@ def build_canonical_results(
     total_gain = energy_rent["rentability"]["total_gain_chf"]
 
     annualized_gain = (
-        r(total_gain / duration_days * 365)
+        round_value(total_gain / duration_days * 365)
         if cycles is not None and duration_days >= 7
         else None
     )
 
     amortization_years = (
-        r(battery_cost / annualized_gain)
+        round_value(battery_cost / annualized_gain)
         if cycles is not None
         and annualized_gain is not None
         and annualized_gain > 0
@@ -440,7 +442,7 @@ def compute_energy_and_rentability_from_df(df):
                 "phase": phase,
                 "tariff": tarif,
                 "energy_kwh": inj_delta_kwh,
-                "delta_chf": r(abs(inj_chf_signed)),
+                "delta_chf": round_value(abs(inj_chf_signed)),
                 "financial_effect": financial_effect(inj_delta_kwh, "injected")
             })
 
@@ -448,7 +450,7 @@ def compute_energy_and_rentability_from_df(df):
                 "phase": phase,
                 "tariff": tarif,
                 "energy_kwh": con_delta_kwh,
-                "delta_chf": r(abs(con_chf_signed)),
+                "delta_chf": round_value(abs(con_chf_signed)),
                 "financial_effect": financial_effect(con_delta_kwh, "consumed")
             })
 
@@ -463,7 +465,7 @@ def compute_energy_and_rentability_from_df(df):
             "consumed": consumed_table
         },
         "rentability": {
-            "total_gain_chf": r(total_gain_chf),
+            "total_gain_chf": round_value(total_gain_chf),
             "annualization_method": None,
             "annualized_gain_chf": None,
             "amortization_years": None,
@@ -486,13 +488,13 @@ def compute_battery_utilization(cycles, duration_days, max_cycles):
 
     # cycles/year per phase
     cycles_per_year = {
-        phase: r(c / duration_days * 365, 1) if c is not None else None
+        phase: round_value(c / duration_days * 365, 1) if c is not None else None
         for phase, c in cycles.items()
     }
 
     # expected life per phase (years)
     expected_life_years = {
-        phase: (r(max_cycles / cpy, 1) if cpy and cpy > 0 else None)
+        phase: (round_value(max_cycles / cpy, 1) if cpy and cpy > 0 else None)
         for phase, cpy in cycles_per_year.items()
     }
 
@@ -501,14 +503,14 @@ def compute_battery_utilization(cycles, duration_days, max_cycles):
     avg_cpy = sum(cpy_values) / len(cpy_values) if cpy_values else None
 
     return {
-        "cycles_per_year": r(avg_cpy, 1) if avg_cpy is not None else None,
-        "percent_of_max_cycles_per_year": r((avg_cpy / max_cycles) * 100, 2) if avg_cpy else None,
+        "cycles_per_year": round_value(avg_cpy, 1) if avg_cpy is not None else None,
+        "percent_of_max_cycles_per_year": round_value((avg_cpy / max_cycles) * 100, 2) if avg_cpy else None,
 
         # ✅ new: per-phase details
         "per_phase": {
             "cycles_per_year": cycles_per_year,
             "percent_of_max_cycles_per_year": {
-                phase: (r((cpy / max_cycles) * 100, 2) if cpy else None)
+                phase: (round_value ((cpy / max_cycles) * 100, 2) if cpy else None)
                 for phase, cpy in cycles_per_year.items()
             },
             "expected_life_years": expected_life_years
@@ -541,7 +543,7 @@ def financial_effect_from_energy(delta_kwh: float) -> str:
         return "loss"
     return "neutral"
 
-def r(x, digits=2, eps=1e-2):
+def round_value(x, digits=2, eps=1e-2):
     v = round(x, digits)
     return 0.0 if abs(v) < eps else v
 
@@ -575,20 +577,25 @@ def month_to_season(month: int) -> str:
 def compute_seasonal_profitability(ranges):
     monthly = []
 
-    # --- extract monthly gains ---
-    for r in ranges:
-        if not is_monthly_range(r):
+    for rng in ranges:
+        if not is_monthly_range(rng):
             continue
 
-        gain = r["results"]["rentability"]["total_gain_chf"]
-        start = datetime.fromisoformat(r["range"]["start_date"].replace("Z", "+00:00"))
+        if not round_value(rng["range"].get("is_full_month", False)):
+            continue
+
+        gain = rng["results"]["rentability"]["total_gain_chf"]
+        start = datetime.fromisoformat(rng["range"]["start_date"].replace("Z", "+00:00"))
+
+        energy_flows = compute_energy_flows_from_df(rng["_df"])
 
         monthly.append({
-            "month_id": r["range_id"],
+            "month_id": rng["range_id"],
             "year": start.year,
             "month": start.month,
             "season": month_to_season(start.month),
-            "gain_chf": gain
+            "gain_chf": round_value(gain),
+            "energy_flows": energy_flows
         })
 
     if not monthly:
@@ -600,18 +607,41 @@ def compute_seasonal_profitability(ranges):
 
     gains = [m["gain_chf"] for m in monthly]
 
-    # --- season aggregation ---
+    # --- season aggregation (gain + energy) ---
     seasons = {}
+
     for m in monthly:
         s = m["season"]
-        seasons.setdefault(s, []).append(m["gain_chf"])
+
+        seasons.setdefault(s, {
+            "gains": [],
+            "energy": {
+                "grid_consumed_kwh": 0.0,
+                "grid_injected_kwh": 0.0,
+                "battery_charged_kwh": 0.0,
+                "battery_discharged_kwh": 0.0
+            }
+        })
+
+        seasons[s]["gains"].append(m["gain_chf"])
+
+        ef = m["energy_flows"]
+        for k in seasons[s]["energy"]:
+            seasons[s]["energy"][k] += ef[k]
 
     seasonal_summary = {}
-    for s, values in seasons.items():
+
+    for s, data in seasons.items():
+        gains = data["gains"]
+
         seasonal_summary[s] = {
-            "total_gain_chf": round(sum(values), 2),
-            "average_monthly_gain_chf": round(mean(values), 2),
-            "months_count": len(values)
+            "months_count": len(gains),
+            "total_gain_chf": round(sum(gains), 2),
+            "average_monthly_gain_chf": round(mean(gains), 2),
+            "energy_flows": {
+                k: round_value(v, 2)
+                for k, v in data["energy"].items()
+            }
         }
 
     return {
@@ -630,6 +660,71 @@ def compute_seasonal_profitability(ranges):
         "seasonal_breakdown": seasonal_summary
     }
 
+def is_full_month_range(start_dt, end_dt, samples):
+    year = start_dt.year
+    month = start_dt.month
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    expected_samples = days_in_month * 1440
+
+    return (
+        start_dt.day == 1 and
+        start_dt.hour == 0 and
+        start_dt.minute == 0 and
+        end_dt.day == days_in_month and
+        end_dt.hour == 23 and
+        end_dt.minute == 59 and
+        abs(samples - expected_samples) <= 1
+    )
+
+def compute_energy_flows_from_df(df):
+    """
+    Returns energy flows in kWh:
+    - grid_consumed_kwh
+    - grid_injected_kwh
+    - battery_charged_kwh
+    - battery_discharged_kwh
+    """
+
+    grid_consumed = 0.0
+    grid_injected = 0.0
+    battery_charged = 0.0
+    battery_discharged = 0.0
+
+    for _, row in df.iterrows():
+        for p in ["a", "b", "c"]:
+            # grid side (with battery)
+            val = row[f"simulated_house_consumption_phase_{p}_Wh"]
+            if val > 0:
+                grid_consumed += val
+            else:
+                grid_injected += abs(val)
+
+            # battery side
+            battery_charged += calculate_energy_Wh(
+                row[f"charge_power_phase_{p.upper()}_W"], 1
+            )
+            battery_discharged += calculate_energy_Wh(
+                row[f"discharge_power_phase_{p.upper()}_W"], 1
+            )
+
+    return {
+        "grid_consumed_kwh": round_value(grid_consumed / 1000, 2),
+        "grid_injected_kwh": round_value(grid_injected / 1000, 2),
+        "battery_charged_kwh": round_value(battery_charged / 1000, 2),
+        "battery_discharged_kwh": round_value(battery_discharged / 1000, 2)
+    }
+
+def strip_internal_fields_for_json(ranges):
+    """
+    Remove non-JSON-serializable internal fields (like DataFrames)
+    """
+    cleaned = []
+    for r in ranges:
+        r_copy = dict(r)
+        r_copy.pop("_df", None)
+        cleaned.append(r_copy)
+    return cleaned
 
 ###################################################################
 # MAIN
@@ -868,9 +963,9 @@ print("\n+ Successfully simulated battery behavior")
 
 # AUTHORITATIVE BATTERY CYCLES (GLOBAL)
 battery_cycles_global = {
-    "A": r(battery_cycle_total["A"]),
-    "B": r(battery_cycle_total["B"]),
-    "C": r(battery_cycle_total["C"])
+    "A": round_value(battery_cycle_total["A"]),
+    "B": round_value(battery_cycle_total["B"]),
+    "C": round_value(battery_cycle_total["C"])
 }
 
 # Build results DataFrame
@@ -1126,7 +1221,8 @@ ranges.append({
         battery_cost,
         duration_days_global,
         cycles=battery_cycles_global
-    )
+    ),
+    "_df": results_df
 })
 
 range_index += 1
@@ -1139,17 +1235,29 @@ for (year, month), df_month in monthly_groups:
         (df_month["timestamp"].max() - df_month["timestamp"].min()).days
     )
 
+    range_meta = build_range_metadata(df_month, duration_days_month)
+
+    start_dt = datetime.fromisoformat(range_meta["start_date"])
+    end_dt = datetime.fromisoformat(range_meta["end_date"])
+
+    range_meta["is_full_month"] = is_full_month_range(
+        start_dt,
+        end_dt,
+        range_meta["samples_analyzed"]
+    )
+
     ranges.append({
         "range_index": range_index,
         "range_id": f"{year}-{month:02d}",
         "range_type": "monthly",
-        "range": build_range_metadata(df_month, duration_days_month),
+        "range": range_meta,
         "results": build_canonical_results(
             df_month,
             battery_cost,
             duration_days_month,
             cycles=None
-        )
+        ),
+        "_df": df_month 
     })
 
     range_index += 1
