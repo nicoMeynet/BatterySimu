@@ -13,6 +13,7 @@ from tabulate import tabulate
 import json
 import hashlib
 from datetime import datetime, UTC
+from statistics import mean, stdev
 
 ###################################################################
 # CONFIGURATION
@@ -196,7 +197,7 @@ def compute_configuration_hash(configuration: dict) -> str:
     )
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
-def build_json_report(simulation_ranges):
+def build_json_report(simulation_ranges, seasonal_profitability=None):
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
 
@@ -212,7 +213,8 @@ def build_json_report(simulation_ranges):
         "configuration_hash": configuration_hash,
 
         "simulation": {
-            "ranges": simulation_ranges
+            "ranges": simulation_ranges,
+            "seasonal_profitability": seasonal_profitability
         }
     }
 
@@ -557,6 +559,77 @@ def financial_effect(delta_kwh: float, category: str) -> str:
         return "gain" if delta_kwh > 0 else "loss"
 
     raise ValueError(f"Unknown category: {category}")
+
+def is_monthly_range(r):
+    return r.get("range_type") == "monthly"
+
+def month_to_season(month: int) -> str:
+    if month in (12, 1, 2):
+        return "winter"
+    if month in (6, 7, 8):
+        return "summer"
+    if month in (3, 4, 5):
+        return "spring"
+    return "autumn"
+
+def compute_seasonal_profitability(ranges):
+    monthly = []
+
+    # --- extract monthly gains ---
+    for r in ranges:
+        if not is_monthly_range(r):
+            continue
+
+        gain = r["results"]["rentability"]["total_gain_chf"]
+        start = datetime.fromisoformat(r["range"]["start_date"].replace("Z", "+00:00"))
+
+        monthly.append({
+            "month_id": r["range_id"],
+            "year": start.year,
+            "month": start.month,
+            "season": month_to_season(start.month),
+            "gain_chf": gain
+        })
+
+    if not monthly:
+        return None
+
+    # --- best / worst ---
+    best = max(monthly, key=lambda x: x["gain_chf"])
+    worst = min(monthly, key=lambda x: x["gain_chf"])
+
+    gains = [m["gain_chf"] for m in monthly]
+
+    # --- season aggregation ---
+    seasons = {}
+    for m in monthly:
+        s = m["season"]
+        seasons.setdefault(s, []).append(m["gain_chf"])
+
+    seasonal_summary = {}
+    for s, values in seasons.items():
+        seasonal_summary[s] = {
+            "total_gain_chf": round(sum(values), 2),
+            "average_monthly_gain_chf": round(mean(values), 2),
+            "months_count": len(values)
+        }
+
+    return {
+        "monthly_evolution": monthly,
+        "best_month": {
+            "month": best["month_id"],
+            "gain_chf": round(best["gain_chf"], 2)
+        },
+        "worst_month": {
+            "month": worst["month_id"],
+            "gain_chf": round(worst["gain_chf"], 2)
+        },
+        "best_worst_delta_chf": round(best["gain_chf"] - worst["gain_chf"], 2),
+        "average_monthly_gain_chf": round(mean(gains), 2),
+        "monthly_volatility_chf": round(stdev(gains), 2) if len(gains) > 1 else 0.0,
+        "seasonal_breakdown": seasonal_summary
+    }
+
 
 ###################################################################
 # MAIN
@@ -1085,9 +1158,17 @@ for (year, month), df_month in monthly_groups:
 print()  # newline after progress bar
 
 # ===============================
+# SEASONAL PROFITABILITY
+# ===============================
+seasonal_profitability = compute_seasonal_profitability(ranges)
+
+# ===============================
 # EXPORT JSON
 # ===============================
 if args.export_json:
     print("Exporting JSON report...")
-    json_report = build_json_report(simulation_ranges=ranges)
+    json_report = build_json_report(
+        simulation_ranges=ranges,
+        seasonal_profitability=seasonal_profitability
+    )
     export_json_report(json_report, args.export_json)
