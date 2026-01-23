@@ -226,7 +226,7 @@ def build_range_metadata(df, duration_days):
         "start_date": df["timestamp"].min().isoformat(),
         "end_date": df["timestamp"].max().isoformat(),
         "samples_analyzed": len(df),
-        "duration_days": duration_days
+        "calendar_duration_days": duration_days
     }
 
 def build_battery_statistics(
