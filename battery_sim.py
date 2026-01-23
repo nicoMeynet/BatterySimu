@@ -97,6 +97,8 @@ def simulate_battery_behavior(house_grid_power_watts):
     battery_cycle = [0, 0, 0]
     charge_power_watts = [0, 0, 0]
     discharge_power_watts = [0, 0, 0]
+    battery_energy_charged_Wh = [0.0, 0.0, 0.0]
+    battery_energy_discharged_Wh = [0.0, 0.0, 0.0]
     for phase in range(3):
         if house_grid_power_watts[phase] < 0:
             # Inject into the grid, charge the battery with the surplus
@@ -105,6 +107,7 @@ def simulate_battery_behavior(house_grid_power_watts):
                 # Charge the battery if not full
                 charge_power_watts[phase] = min(surplus_watts, max_charge_power_watts[phase])
                 energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts[phase], 1) * battery_charge_efficiency
+                battery_energy_charged_Wh[phase] = energy_to_be_injected_in_battery_Wh
                 energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
                 energy_in_battery_Wh[phase] = min(energy_in_battery_Wh[phase], battery_capacity_Wh[phase])
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts[phase]
@@ -121,6 +124,7 @@ def simulate_battery_behavior(house_grid_power_watts):
             if energy_in_battery_Wh[phase] > 0:
                 # Discharge the battery if not empty
                 energy_to_be_consumed_from_battery_Wh = calculate_energy_Wh(discharge_power_watts[phase], 1) * (1 / battery_discharge_efficiency)
+                battery_energy_discharged_Wh[phase] = energy_to_be_consumed_from_battery_Wh
                 energy_in_battery_Wh[phase] -= energy_to_be_consumed_from_battery_Wh
                 energy_in_battery_Wh[phase] = max(0, energy_in_battery_Wh[phase])
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts[phase]
@@ -138,7 +142,9 @@ def simulate_battery_behavior(house_grid_power_watts):
             "battery_status": battery_status[0],
             "battery_cycle": battery_cycle[0],
             "charge_power_watts": charge_power_watts[0],
-            "discharge_power_watts": discharge_power_watts[0]
+            "discharge_power_watts": discharge_power_watts[0],
+            "battery_energy_charged_Wh": battery_energy_charged_Wh[0],
+            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[0]
         },
         "B": {
             "new_house_grid_power_watts": new_house_grid_power_watts[1],
@@ -146,7 +152,9 @@ def simulate_battery_behavior(house_grid_power_watts):
             "battery_status": battery_status[1],
             "battery_cycle": battery_cycle[1],
             "charge_power_watts": charge_power_watts[1],
-            "discharge_power_watts": discharge_power_watts[1]
+            "discharge_power_watts": discharge_power_watts[1],
+            "battery_energy_charged_Wh": battery_energy_charged_Wh[1],
+            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[1]
         },
         "C": {
             "new_house_grid_power_watts": new_house_grid_power_watts[2],
@@ -154,7 +162,9 @@ def simulate_battery_behavior(house_grid_power_watts):
             "battery_status": battery_status[2],
             "battery_cycle": battery_cycle[2],
             "charge_power_watts": charge_power_watts[2],
-            "discharge_power_watts": discharge_power_watts[2]
+            "discharge_power_watts": discharge_power_watts[2],
+            "battery_energy_charged_Wh": battery_energy_charged_Wh[2],
+            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[2]
         }
     }
 
@@ -700,13 +710,9 @@ def compute_energy_flows_from_df(df):
             else:
                 grid_injected += abs(val)
 
-            # battery side
-            battery_charged += calculate_energy_Wh(
-                row[f"charge_power_phase_{p.upper()}_W"], 1
-            )
-            battery_discharged += calculate_energy_Wh(
-                row[f"discharge_power_phase_{p.upper()}_W"], 1
-            )
+            # battery side (REAL battery energy)
+            battery_charged += row[f"battery_charged_phase_{p.upper()}_Wh"]
+            battery_discharged += row[f"battery_discharged_phase_{p.upper()}_Wh"]
 
     return {
         "grid_consumed_kwh": round_value(grid_consumed / 1000, 2),
@@ -956,7 +962,14 @@ for i in range(total_steps):
         "charge_power_phase_C_W": sim_result["C"]["charge_power_watts"],
         "discharge_power_phase_A_W": sim_result["A"]["discharge_power_watts"],
         "discharge_power_phase_B_W": sim_result["B"]["discharge_power_watts"],
-        "discharge_power_phase_C_W": sim_result["C"]["discharge_power_watts"]
+        "discharge_power_phase_C_W": sim_result["C"]["discharge_power_watts"],
+        "battery_charged_phase_A_Wh": sim_result["A"]["battery_energy_charged_Wh"],
+        "battery_charged_phase_B_Wh": sim_result["B"]["battery_energy_charged_Wh"],
+        "battery_charged_phase_C_Wh": sim_result["C"]["battery_energy_charged_Wh"],
+        "battery_discharged_phase_A_Wh": sim_result["A"]["battery_energy_discharged_Wh"],
+        "battery_discharged_phase_B_Wh": sim_result["B"]["battery_energy_discharged_Wh"],
+        "battery_discharged_phase_C_Wh": sim_result["C"]["battery_energy_discharged_Wh"],
+
     })
 
 print("\n+ Successfully simulated battery behavior")
