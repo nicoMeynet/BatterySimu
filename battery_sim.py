@@ -12,7 +12,7 @@ import sys
 from tabulate import tabulate
 import json
 import hashlib
-from datetime import datetime, UTC, timezone
+from datetime import datetime, UTC
 from statistics import mean, stdev
 import calendar
 
@@ -527,35 +527,25 @@ def compute_battery_utilization(cycles, duration_days, max_cycles):
         }
     }
 
-def compute_expected_life_years_per_phase(cycles: dict, max_cycles: float):
-    """
-    Estimate battery life per phase (years) assuming max_cycles is EOL and
-    future usage is similar to measured cycles/year.
-    """
-    out = {}
-    for phase, c in cycles.items():
-        if c is None:
-            out[phase] = None
-            continue
-        # c is cycles over the simulated duration
-        # We'll convert to cycles/year when building results (needs duration_days),
-        # so here we just keep structure; real calc done below.
-        out[phase] = None
-    return out
-
 def empty_energy_dict():
     return {p: {"HP": 0, "HC": 0} for p in PHASE_KEYS}
 
-def financial_effect_from_energy(delta_kwh: float) -> str:
-    if delta_kwh < 0:
-        return "gain"
-    elif delta_kwh > 0:
-        return "loss"
-    return "neutral"
-
 def round_value(x, digits=2, eps=1e-2):
+    if not isinstance(x, (int, float)):
+        return x
     v = round(x, digits)
     return 0.0 if abs(v) < eps else v
+
+def round_nested(obj, digits=2):
+    """
+    Recursively apply round_value() to all numeric values
+    inside nested dicts (used for JSON/report outputs).
+    """
+    if isinstance(obj, dict):
+        return {k: round_nested(v, digits) for k, v in obj.items()}
+    if isinstance(obj, (int, float)):
+        return round_value(obj, digits)
+    return obj
 
 def financial_effect(delta_kwh: float, category: str) -> str:
     """
@@ -591,13 +581,22 @@ def compute_seasonal_profitability(ranges):
         if not is_monthly_range(rng):
             continue
 
-        if not round_value(rng["range"].get("is_full_month", False)):
+        if not rng["range"].get("is_full_month", False):
             continue
+
 
         gain = rng["results"]["rentability"]["total_gain_chf"]
         start = datetime.fromisoformat(rng["range"]["start_date"].replace("Z", "+00:00"))
 
-        energy_flows = compute_energy_flows_from_df(rng["_df"])
+        energy_with_battery = compute_energy_flows_from_df(rng["_df"])
+        energy_without_battery = derive_no_battery_flows(energy_with_battery)
+        battery_losses_kwh = compute_battery_losses(energy_with_battery)
+
+        energy_flows = {
+            "with_battery": energy_with_battery,
+            "without_battery": energy_without_battery,
+            "battery_losses_kwh": battery_losses_kwh
+        }
 
         monthly.append({
             "month_id": rng["range_id"],
@@ -626,18 +625,29 @@ def compute_seasonal_profitability(ranges):
         seasons.setdefault(s, {
             "gains": [],
             "energy": {
-                "grid_consumed_kwh": 0.0,
-                "grid_injected_kwh": 0.0,
-                "battery_charged_kwh": 0.0,
-                "battery_discharged_kwh": 0.0
+                "with_battery": {
+                    "grid_consumed_kwh": 0.0,
+                    "grid_injected_kwh": 0.0,
+                    "battery_charged_kwh": 0.0,
+                    "battery_discharged_kwh": 0.0
+                },
+                "without_battery": {
+                    "grid_consumed_kwh": 0.0,
+                    "grid_injected_kwh": 0.0
+                },
+                "battery_losses_kwh": 0.0
             }
         })
 
         seasons[s]["gains"].append(m["gain_chf"])
 
         ef = m["energy_flows"]
-        for k in seasons[s]["energy"]:
-            seasons[s]["energy"][k] += ef[k]
+
+        for scope in ["with_battery", "without_battery"]:
+            for k, v in ef[scope].items():
+                seasons[s]["energy"][scope][k] += v
+
+        seasons[s]["energy"]["battery_losses_kwh"] += ef["battery_losses_kwh"]
 
     seasonal_summary = {}
 
@@ -646,27 +656,24 @@ def compute_seasonal_profitability(ranges):
 
         seasonal_summary[s] = {
             "months_count": len(gains),
-            "total_gain_chf": round(sum(gains), 2),
-            "average_monthly_gain_chf": round(mean(gains), 2),
-            "energy_flows": {
-                k: round_value(v, 2)
-                for k, v in data["energy"].items()
-            }
+            "total_gain_chf": round_value(sum(gains), 2),
+            "average_monthly_gain_chf": round_value(mean(gains), 2),
+            "energy_flows": round_nested(data["energy"], 2)
         }
 
     return {
         "monthly_evolution": monthly,
         "best_month": {
             "month": best["month_id"],
-            "gain_chf": round(best["gain_chf"], 2)
+            "gain_chf": round_value(best["gain_chf"], 2)
         },
         "worst_month": {
             "month": worst["month_id"],
-            "gain_chf": round(worst["gain_chf"], 2)
+            "gain_chf": round_value(worst["gain_chf"], 2)
         },
-        "best_worst_delta_chf": round(best["gain_chf"] - worst["gain_chf"], 2),
-        "average_monthly_gain_chf": round(mean(gains), 2),
-        "monthly_volatility_chf": round(stdev(gains), 2) if len(gains) > 1 else 0.0,
+        "best_worst_delta_chf": round_value(best["gain_chf"] - worst["gain_chf"], 2),
+        "average_monthly_gain_chf": round_value(mean(gains), 2),
+        "monthly_volatility_chf": round_value(stdev(gains), 2) if len(gains) > 1 else 0.0,
         "seasonal_breakdown": seasonal_summary
     }
 
@@ -731,6 +738,31 @@ def strip_internal_fields_for_json(ranges):
         r_copy.pop("_df", None)
         cleaned.append(r_copy)
     return cleaned
+
+def derive_no_battery_flows(energy_flows):
+    """
+    Reconstruct grid flows as if no battery existed.
+    """
+    return {
+        "grid_consumed_kwh": round_value(
+            energy_flows["grid_consumed_kwh"] +
+            energy_flows["battery_discharged_kwh"], 2
+        ),
+        "grid_injected_kwh": round_value(
+            energy_flows["grid_injected_kwh"] +
+            energy_flows["battery_charged_kwh"], 2
+        )
+    }
+
+def compute_battery_losses(energy_flows):
+    """
+    Battery losses estimated as (charged - discharged).
+    This includes efficiency losses AND net SoC delta over the period.
+    """
+    return round_value(
+        energy_flows["battery_charged_kwh"] -
+        energy_flows["battery_discharged_kwh"], 2
+    )
 
 ###################################################################
 # MAIN
