@@ -719,19 +719,27 @@ def compute_seasonal_profitability(ranges):
         avg_power_sat = mean(power_sat_vals) if power_sat_vals else 0.0
 
         if avg_power_sat > BATTERY_POWER_SATURATION_THRESHOLD_PCT:
-            diagnosis = "power_limited"
+            diagnosis = "constraint_storage_power"
+
+        elif (
+            avg_full is not None
+            and avg_full > BATTERY_SATURATION_FULL_THRESHOLD_PCT
+            and data["energy"]["with_battery"]["grid_injected_kwh"]
+                > PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH
+        ):
+            diagnosis = "constraint_storage_energy_pv"
 
         elif avg_empty is not None and avg_empty > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
             if charged_kwh <= BATTERY_MIN_CHARGE_ACTIVITY_KWH:
-                diagnosis = "pv_limited"
+                diagnosis = "constraint_pv_energy"
             else:
-                diagnosis = "storage_capacity_limited_for_load"
+                diagnosis = "constraint_storage_energy_load"
 
         elif avg_full is not None and avg_full > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
-            diagnosis = "low_need_for_storage"
+            diagnosis = "constraint_low_storage_need"
 
         else:
-            diagnosis = "balanced"
+            diagnosis = "no_dominant_constraint"
 
         seasonal_summary[s] = {
             "months_count": len(gains),
@@ -907,25 +915,25 @@ def compute_battery_saturation_from_df(df):
     grid_injected_kwh /= 1000
 
     if charge_power_saturation_pct > BATTERY_POWER_SATURATION_THRESHOLD_PCT:
-        diagnosis = "power_limited"
+        diagnosis = "constraint_storage_power"
 
     elif (
         full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT
         and grid_injected_kwh > PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH
     ):
-        diagnosis = "undersized_for_pv_surplus"
+        diagnosis = "constraint_storage_energy_pv"
 
     elif empty_pct > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
         if charged_kwh <= BATTERY_MIN_CHARGE_ACTIVITY_KWH:
-            diagnosis = "pv_limited"
+            diagnosis = "constraint_pv_energy"
         else:
-            diagnosis = "storage_capacity_limited_for_load"
+            diagnosis = "constraint_storage_energy_load"
 
     elif full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
-        diagnosis = "low_need_for_storage"
+        diagnosis = "constraint_low_storage_need"
 
     else:
-        diagnosis = "balanced"
+        diagnosis = "no_dominant_constraint"
 
     return {
         "battery_full_share_percent": round_value(full_pct, 1),
