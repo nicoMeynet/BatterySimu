@@ -37,11 +37,6 @@ battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 6000                       # Battery lifespan in cycles
 battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
 
-# Thresholds represent the % of time the battery is constrained (empty or full)
-# Above threshold → capacity likely mis-sized
-BATTERY_SATURATION_EMPTY_THRESHOLD_PCT = 30
-BATTERY_SATURATION_FULL_THRESHOLD_PCT = 30
-
 # ---- Electricity tariff configuration ----
 tariff_config = {
     "peak": {
@@ -55,6 +50,35 @@ tariff_config = {
         "tariff_inject": 0.06        # CHF/kWh for the rest of the time
     }
 }
+
+# ---- PV surplus heuristic (energy-based) ----
+PV_SURPLUS_UNCAPTURED_THRESHOLD_FRACTION = 0.3
+# 30% of battery capacity injected to grid over period ⇒ PV surplus not captured
+
+# ---- Battery power saturation heuristic (power-based) ----
+BATTERY_POWER_SATURATION_THRESHOLD_PCT = 5.0  # % of charging time at max power
+
+# ---- Battery saturation heuristics (time-based) ----
+# Percentage of time the battery is constrained
+BATTERY_SATURATION_EMPTY_THRESHOLD_PCT = 25   # % of time battery is empty
+BATTERY_SATURATION_FULL_THRESHOLD_PCT  = 25   # % of time battery is full
+
+# ---- Battery activity heuristic (energy-based) ----
+# Minimum charged energy over a period to consider the battery capacity-limited
+BATTERY_MIN_CHARGE_ACTIVITY_FRACTION = 0.2    # fraction of one full battery cycle
+
+# Total battery capacity (all phases)
+battery_capacity_total_kwh = sum(battery_capacity_Wh) / 1000
+
+# Minimum kWh charged over the period to rule out "PV-limited" diagnosis
+BATTERY_MIN_CHARGE_ACTIVITY_KWH = (
+    BATTERY_MIN_CHARGE_ACTIVITY_FRACTION * battery_capacity_total_kwh
+)
+# Threshold of un-captured PV surplus energy (kWh) over the period
+PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH = (
+    PV_SURPLUS_UNCAPTURED_THRESHOLD_FRACTION * battery_capacity_total_kwh
+)
+
 
 ###################################################################
 # FUNCTIONS
@@ -684,10 +708,28 @@ def compute_seasonal_profitability(ranges):
         avg_full = mean(full_vals) if full_vals else None
         avg_empty = mean(empty_vals) if empty_vals else None
 
-        if avg_empty and avg_empty > 30:
-            diagnosis = "undersized"
-        elif avg_full and avg_full > 30:
-            diagnosis = "oversized"
+        charged_kwh = data["energy"]["with_battery"]["battery_charged_kwh"]
+
+        power_sat_vals = [
+            m["battery_saturation"].get("charge_power_saturation_percent", 0)
+            for m in monthly
+            if m["season"] == s
+        ]
+
+        avg_power_sat = mean(power_sat_vals) if power_sat_vals else 0.0
+
+        if avg_power_sat > BATTERY_POWER_SATURATION_THRESHOLD_PCT:
+            diagnosis = "power_limited"
+
+        elif avg_empty is not None and avg_empty > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
+            if charged_kwh <= BATTERY_MIN_CHARGE_ACTIVITY_KWH:
+                diagnosis = "pv_limited"
+            else:
+                diagnosis = "storage_capacity_limited_for_load"
+
+        elif avg_full is not None and avg_full > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
+            diagnosis = "low_need_for_storage"
+
         else:
             diagnosis = "balanced"
 
@@ -832,19 +874,76 @@ def compute_battery_saturation_from_df(df):
     full_pct = round_value(full / total_samples * 100, 1)
     empty_pct = round_value(empty / total_samples * 100, 1)
 
-    # Simple heuristic
-    if empty_pct > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
-        diagnosis = "undersized"
+    # Energy-based activity (kWh)
+    charged_kwh = (
+        df[[f"battery_charged_phase_{p}_Wh" for p in PHASE_KEYS]]
+        .sum()
+        .sum() / 1000
+    )
+
+    # Power-based saturation (% of charging samples at max power)
+    charge_power_samples = 0
+    charge_power_at_max = 0
+
+    for i, phase in enumerate(PHASE_KEYS):
+        col = f"charge_power_phase_{phase}_W"
+        active = df[col] > 0
+        charge_power_samples += active.sum()
+        charge_power_at_max += (df[col] == max_charge_power_watts[i]).sum()
+
+    charge_power_saturation_pct = (
+        (charge_power_at_max / charge_power_samples * 100)
+        if charge_power_samples > 0
+        else 0.0
+    )
+
+    # Grid injection WITH battery (kWh)
+    grid_injected_kwh = 0.0
+
+    for p in ["a", "b", "c"]:
+        vals = df[f"simulated_house_consumption_phase_{p}_Wh"]
+        grid_injected_kwh += abs(vals[vals < 0].sum())
+
+    grid_injected_kwh /= 1000
+
+    if charge_power_saturation_pct > BATTERY_POWER_SATURATION_THRESHOLD_PCT:
+        diagnosis = "power_limited"
+
+    elif (
+        full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT
+        and grid_injected_kwh > PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH
+    ):
+        diagnosis = "undersized_for_pv_surplus"
+
+    elif empty_pct > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
+        if charged_kwh <= BATTERY_MIN_CHARGE_ACTIVITY_KWH:
+            diagnosis = "pv_limited"
+        else:
+            diagnosis = "storage_capacity_limited_for_load"
+
     elif full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
-        diagnosis = "oversized"
+        diagnosis = "low_need_for_storage"
+
     else:
         diagnosis = "balanced"
 
     return {
-        "battery_full_share_percent": full_pct,
-        "battery_empty_share_percent": empty_pct
+        "battery_full_share_percent": round_value(full_pct, 1),
+        "battery_empty_share_percent": round_value(empty_pct, 1),
+        "charged_energy_kwh": round_value(charged_kwh, 2),
+        "min_activity_kwh_threshold": round_value(
+            BATTERY_MIN_CHARGE_ACTIVITY_KWH, 2
+        ),
+        "charge_power_saturation_percent": round_value(
+            charge_power_saturation_pct, 2
+        ),
+        "power_saturation_threshold_percent": BATTERY_POWER_SATURATION_THRESHOLD_PCT,
+        "grid_injected_kwh": round_value(grid_injected_kwh, 2),
+        "pv_surplus_uncaptured_threshold_kwh": round_value(
+            PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH, 2
+        ),
+        "diagnosis": diagnosis
     }
-
 
 ###################################################################
 # MAIN
@@ -1221,7 +1320,8 @@ headers = ["Status", "Phase A", "Phase B", "Phase C"]
 print("")
 print("Battery Status:")
 print("This table illustrates the time the battery spends in each status.")
-print("A battery that is fully charged too often may indicate that it is undersized, whereas a battery that is frequently empty may suggest that it is oversized.")
+print("A battery that is fully charged too often may indicate that it is oversized, whereas a battery that is frequently empty may suggest that it is undersized (unless PV-limited).")
+
 print("The distribution of charging and discharging can provide insights into whether the battery is used frequently or infrequently. If the discharging percentage exceeds the charging percentage, it indicates that the battery is frequently utilized to reduce grid consumption.")
 print(tabulate(battery_status_data, headers, tablefmt="grid"))
 
