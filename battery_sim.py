@@ -590,7 +590,12 @@ def compute_seasonal_profitability(ranges):
 
         energy_with_battery = compute_energy_flows_from_df(rng["_df"])
         energy_without_battery = derive_no_battery_flows(energy_with_battery)
-        battery_losses_kwh = compute_battery_losses(energy_with_battery)
+
+        battery_losses_kwh = compute_battery_losses(
+            energy_with_battery,
+            battery_charge_efficiency,
+            battery_discharge_efficiency,
+        )
 
         energy_flows = {
             "with_battery": energy_with_battery,
@@ -754,15 +759,20 @@ def derive_no_battery_flows(energy_flows):
         )
     }
 
-def compute_battery_losses(energy_flows):
+def compute_battery_losses(energy_flows, charge_eff, discharge_eff):
     """
-    Battery losses estimated as (charged - discharged).
-    This includes efficiency losses AND net SoC delta over the period.
+    Pure battery energy losses due to efficiency.
+    Always >= 0. Does NOT include SoC drift.
     """
-    return round_value(
-        energy_flows["battery_charged_kwh"] -
-        energy_flows["battery_discharged_kwh"], 2
+    charged = energy_flows["battery_charged_kwh"]
+    discharged = energy_flows["battery_discharged_kwh"]
+
+    losses = (
+        charged * (1 - charge_eff) +
+        discharged * (1 - discharge_eff)
     )
+
+    return round_value(losses, 2)
 
 ###################################################################
 # MAIN
