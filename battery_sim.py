@@ -37,6 +37,11 @@ battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 6000                       # Battery lifespan in cycles
 battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
 
+# Thresholds represent the % of time the battery is constrained (empty or full)
+# Above threshold → capacity likely mis-sized
+BATTERY_SATURATION_EMPTY_THRESHOLD_PCT = 30
+BATTERY_SATURATION_FULL_THRESHOLD_PCT = 30
+
 # ---- Electricity tariff configuration ----
 tariff_config = {
     "peak": {
@@ -609,7 +614,8 @@ def compute_seasonal_profitability(ranges):
             "month": start.month,
             "season": month_to_season(start.month),
             "gain_chf": round_value(gain),
-            "energy_flows": energy_flows
+            "energy_flows": energy_flows,
+            "battery_saturation": compute_battery_saturation_from_df(rng["_df"])
         })
 
     if not monthly:
@@ -641,12 +647,25 @@ def compute_seasonal_profitability(ranges):
                     "grid_injected_kwh": 0.0
                 },
                 "battery_losses_kwh": 0.0
+            },
+            "battery_saturation": {
+                "full_pct": [],
+                "empty_pct": []
             }
         })
 
         seasons[s]["gains"].append(m["gain_chf"])
 
         ef = m["energy_flows"]
+
+        sat = m.get("battery_saturation")
+        if sat:
+            seasons[s]["battery_saturation"]["full_pct"].append(
+                sat["battery_full_share_percent"]
+            )
+            seasons[s]["battery_saturation"]["empty_pct"].append(
+                sat["battery_empty_share_percent"]
+            )
 
         for scope in ["with_battery", "without_battery"]:
             for k, v in ef[scope].items():
@@ -659,11 +678,29 @@ def compute_seasonal_profitability(ranges):
     for s, data in seasons.items():
         gains = data["gains"]
 
+        full_vals = data["battery_saturation"]["full_pct"]
+        empty_vals = data["battery_saturation"]["empty_pct"]
+
+        avg_full = mean(full_vals) if full_vals else None
+        avg_empty = mean(empty_vals) if empty_vals else None
+
+        if avg_empty and avg_empty > 30:
+            diagnosis = "undersized"
+        elif avg_full and avg_full > 30:
+            diagnosis = "oversized"
+        else:
+            diagnosis = "balanced"
+
         seasonal_summary[s] = {
             "months_count": len(gains),
             "total_gain_chf": round_value(sum(gains), 2),
             "average_monthly_gain_chf": round_value(mean(gains), 2),
-            "energy_flows": round_nested(data["energy"], 2)
+            "energy_flows": round_nested(data["energy"], 2),
+            "battery_saturation": {
+                "average_full_share_percent": round_value(avg_full, 1) if avg_full is not None else None,
+                "average_empty_share_percent": round_value(avg_empty, 1) if avg_empty is not None else None,
+                "diagnosis": diagnosis
+            }
         }
 
     return {
@@ -773,6 +810,41 @@ def compute_battery_losses(energy_flows, charge_eff, discharge_eff):
     )
 
     return round_value(losses, 2)
+
+def compute_battery_saturation_from_df(df):
+    """
+    Compute battery saturation indicators from per-timestep battery status.
+    Aggregated across all phases.
+    """
+    total_samples = len(df) * len(PHASE_KEYS)
+
+    if total_samples == 0:
+        return None
+
+    full = 0
+    empty = 0
+
+    for phase in PHASE_KEYS:
+        col = f"battery_status_phase_{phase}"
+        full += (df[col] == "full").sum()
+        empty += (df[col] == "empty").sum()
+
+    full_pct = round_value(full / total_samples * 100, 1)
+    empty_pct = round_value(empty / total_samples * 100, 1)
+
+    # Simple heuristic
+    if empty_pct > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
+        diagnosis = "undersized"
+    elif full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
+        diagnosis = "oversized"
+    else:
+        diagnosis = "balanced"
+
+    return {
+        "battery_full_share_percent": full_pct,
+        "battery_empty_share_percent": empty_pct
+    }
+
 
 ###################################################################
 # MAIN
