@@ -24,12 +24,12 @@ PHASE_KEYS = ["A", "B", "C"]
 # ---- Battery parameters ----
 #battery_capacity_Wh = [2880, 2880, 2880]        # Battery capacity per phase (Wh)
 #battery_cost = 3270                             # Battery cost (CHF)
-#battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
-#battery_cost = 4800                             # Battery cost (CHF)
+battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
+battery_cost = 4800                             # Battery cost (CHF)
 #battery_capacity_Wh = [8640, 8640, 8640]        # Battery capacity per phase (Wh)
 #battery_cost = 7500                             # Battery cost (CHF)
-battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
-battery_cost = 9600                             # Battery cost (CHF)
+#battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
+#battery_cost = 9600                             # Battery cost (CHF)
 max_charge_power_watts = [2400, 2400, 2400]     # Max charge power per phase (W)
 max_discharge_power_watts = [2400, 2400, 2400]  # Max discharge power per phase (W)
 battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
@@ -615,6 +615,43 @@ def compute_seasonal_profitability(ranges):
             "battery_saturation": compute_battery_saturation_from_df(rng["_df"])
         })
 
+        # ---- Daily undersize detection ----
+        daily_energy_flags = []
+        daily_evening_flags = []
+
+        df_month = rng["_df"].copy()
+        df_month["date"] = df_month["timestamp"].dt.date
+
+        for _, df_day in df_month.groupby("date"):
+            daily_energy_flags.append(
+                compute_daily_energy_undersize(df_day)
+            )
+            daily_evening_flags.append(
+                compute_daily_evening_undersize(df_day)
+            )
+
+        energy_undersized_days = sum(1 for x in daily_energy_flags if x)
+        evening_undersized_days = sum(1 for x in daily_evening_flags if x)
+        total_days = len(daily_energy_flags)
+
+        monthly[-1]["daily_energy_undersize"] = {
+            "undersized_days": energy_undersized_days,
+            "total_days": total_days,
+            "percent": round_value(
+                energy_undersized_days / total_days * 100 if total_days > 0 else 0,
+                1
+            )
+        }
+
+        monthly[-1]["daily_evening_undersize"] = {
+            "undersized_days": evening_undersized_days,
+            "total_days": total_days,
+            "percent": round_value(
+                evening_undersized_days / total_days * 100 if total_days > 0 else 0,
+                1
+            )
+        }
+
     if not monthly:
         return None
 
@@ -648,6 +685,14 @@ def compute_seasonal_profitability(ranges):
             "battery_saturation": {
                 "full_pct": [],
                 "empty_pct": []
+            },
+            "daily_energy_undersize": {
+                "undersized_days": 0,
+                "total_days": 0
+            },
+            "daily_evening_undersize": {
+                "undersized_days": 0,
+                "total_days": 0
             }
         })
 
@@ -670,6 +715,16 @@ def compute_seasonal_profitability(ranges):
 
         seasons[s]["energy"]["battery_losses_kwh"] += ef["battery_losses_kwh"]
 
+        du = m.get("daily_energy_undersize")
+        if du:
+            seasons[s]["daily_energy_undersize"]["undersized_days"] += du["undersized_days"]
+            seasons[s]["daily_energy_undersize"]["total_days"] += du["total_days"]
+
+        deu = m.get("daily_evening_undersize")
+        if deu:
+            seasons[s]["daily_evening_undersize"]["undersized_days"] += deu["undersized_days"]
+            seasons[s]["daily_evening_undersize"]["total_days"] += deu["total_days"]
+
     seasonal_summary = {}
 
     for s, data in seasons.items():
@@ -681,13 +736,36 @@ def compute_seasonal_profitability(ranges):
         avg_full = mean(full_vals) if full_vals else None
         avg_empty = mean(empty_vals) if empty_vals else None
 
-        scores = [
-            m["battery_saturation"].get("battery_sizing_score")
-            for m in monthly
-            if m["season"] == s
-        ]
+        undersize_days = data["daily_energy_undersize"]["undersized_days"]
+        total_days = data["daily_energy_undersize"]["total_days"]
 
-        average_score = mean(scores) if scores else None
+        energy_pct = (
+            data["daily_energy_undersize"]["undersized_days"]
+            / data["daily_energy_undersize"]["total_days"] * 100
+            if data["daily_energy_undersize"]["total_days"] > 0 else 0
+        )
+
+        evening_pct = (
+            data["daily_evening_undersize"]["undersized_days"]
+            / data["daily_evening_undersize"]["total_days"] * 100
+            if data["daily_evening_undersize"]["total_days"] > 0 else 0
+        )
+
+        if energy_pct > 20:
+            sizing_score = 30.0
+            diagnosis = "battery_undersized"
+
+        elif energy_pct <= 10 and evening_pct > 25:
+            sizing_score = 70.0
+            diagnosis = "battery_evening_limited"
+
+        elif energy_pct <= 10 and evening_pct <= 15:
+            sizing_score = 90.0
+            diagnosis = "battery_well_sized"
+
+        else:
+            sizing_score = 60.0
+            diagnosis = "battery_oversized"
 
         seasonal_summary[s] = {
             "months_count": len(gains),
@@ -698,12 +776,22 @@ def compute_seasonal_profitability(ranges):
                 "average_full_share_percent": round_value(avg_full, 1) if avg_full is not None else None,
                 "average_empty_share_percent": round_value(avg_empty, 1) if avg_empty is not None else None
             },
-            "battery_sizing": {
-                "average_score": round_value(average_score, 1),
-                "interpretation": (
-                    "undersized" if average_score < 40 else
-                    "oversized" if average_score > 75 else
-                    "well_sized"
+            "battery_energy_undersize_days": {
+                "undersized_days": undersize_days,
+                "total_days": total_days,
+                "percent": round_value(
+                    undersize_days / total_days * 100 if total_days > 0 else 0,
+                    1
+                )
+            },
+            "battery_evening_undersize_days": {
+                "undersized_days": data["daily_evening_undersize"]["undersized_days"],
+                "total_days": data["daily_evening_undersize"]["total_days"],
+                "percent": round_value(
+                    data["daily_evening_undersize"]["undersized_days"]
+                    / data["daily_evening_undersize"]["total_days"] * 100
+                    if data["daily_evening_undersize"]["total_days"] > 0 else 0,
+                    1
                 )
             }
         }
@@ -913,18 +1001,6 @@ def compute_battery_saturation_from_df(df):
 
     grid_injected_kwh /= 1000
 
-    period_score = compute_battery_sizing_score(
-        df,
-        battery_capacity_total_kwh
-    )
-
-    if period_score < 40:
-        diagnosis = "battery_undersized"
-    elif period_score > 75:
-        diagnosis = "battery_oversized"
-    else:
-        diagnosis = "battery_well_sized"
-
     return {
         "battery_full_share_percent": round_value(full_pct, 1),
         "battery_empty_share_percent": round_value(empty_pct, 1),
@@ -932,10 +1008,7 @@ def compute_battery_saturation_from_df(df):
         "charge_power_saturation_percent": round_value(
             charge_power_saturation_pct, 2
         ),
-        "grid_injected_kwh": round_value(grid_injected_kwh, 2),
-        "battery_sizing_score": period_score,
-        "diagnosis": diagnosis
-        
+        "grid_injected_kwh": round_value(grid_injected_kwh, 2)
     }
 
 def compute_sunset_soc_ratio(df_day, battery_capacity_total_kwh):
@@ -980,6 +1053,72 @@ def compute_night_success_ratio(df_day, battery_capacity_total_kwh):
 
     # success if battery never goes below 10 %
     return min_soc_ratio > 0.10
+
+def compute_daily_energy_undersize(df_day):
+    """
+    Returns True if:
+    - battery was FULL at least once during PV window
+    - AND battery became EMPTY before next charging opportunity
+    """
+
+    # --- 1) Battery full during day (PV window approximation) ---
+    day_window = df_day[
+        (df_day["timestamp"].dt.hour >= 10) &
+        (df_day["timestamp"].dt.hour <= 16)
+    ]
+
+    was_full = False
+    for phase in PHASE_KEYS:
+        if (day_window[f"battery_status_phase_{phase}"] == "full").any():
+            was_full = True
+            break
+
+    # --- 2) Battery empty before next charge ---
+    # We consider "empty before next charge" if battery reaches empty
+    # during night (20h -> 8h)
+    night_window = df_day[
+        (df_day["timestamp"].dt.hour >= 20) |
+        (df_day["timestamp"].dt.hour <= 8)
+    ]
+
+    became_empty = False
+    for phase in PHASE_KEYS:
+        if (night_window[f"battery_status_phase_{phase}"] == "empty").any():
+            became_empty = True
+            break
+
+    return was_full and became_empty
+
+def compute_daily_evening_undersize(df_day):
+    """
+    Returns True if:
+    - battery was FULL in late afternoon
+    - AND battery became EMPTY in the evening (before midnight)
+    """
+
+    # Late afternoon: battery was full thanks to PV
+    late_day = df_day[
+        (df_day["timestamp"].dt.hour >= 16) &
+        (df_day["timestamp"].dt.hour <= 19)
+    ]
+
+    was_full = any(
+        (late_day[f"battery_status_phase_{p}"] == "full").any()
+        for p in PHASE_KEYS
+    )
+
+    # Evening: battery emptied early
+    evening = df_day[
+        (df_day["timestamp"].dt.hour >= 18) &
+        (df_day["timestamp"].dt.hour <= 23)
+    ]
+
+    became_empty = any(
+        (evening[f"battery_status_phase_{p}"] == "empty").any()
+        for p in PHASE_KEYS
+    )
+
+    return was_full and became_empty
 
 ###################################################################
 # MAIN
@@ -1246,7 +1385,7 @@ for day, df_day in results_df.groupby("date"):
     )
     daily_scores.append({
         "date": str(day),
-        "battery_sizing_score": score
+        "battery_sizing_score_raw": score
     })
 
 daily_sizing_df = pd.DataFrame(daily_scores)
