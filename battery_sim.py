@@ -24,12 +24,12 @@ PHASE_KEYS = ["A", "B", "C"]
 # ---- Battery parameters ----
 #battery_capacity_Wh = [2880, 2880, 2880]        # Battery capacity per phase (Wh)
 #battery_cost = 3270                             # Battery cost (CHF)
-battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
-battery_cost = 4800                             # Battery cost (CHF)
+#battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
+#battery_cost = 4800                             # Battery cost (CHF)
 #battery_capacity_Wh = [8640, 8640, 8640]        # Battery capacity per phase (Wh)
 #battery_cost = 7500                             # Battery cost (CHF)
-#battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
-#battery_cost = 9600                             # Battery cost (CHF)
+battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
+battery_cost = 9600                             # Battery cost (CHF)
 max_charge_power_watts = [2400, 2400, 2400]     # Max charge power per phase (W)
 max_discharge_power_watts = [2400, 2400, 2400]  # Max discharge power per phase (W)
 battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
@@ -51,34 +51,8 @@ tariff_config = {
     }
 }
 
-# ---- PV surplus heuristic (energy-based) ----
-PV_SURPLUS_UNCAPTURED_THRESHOLD_FRACTION = 0.3
-# 30% of battery capacity injected to grid over period ⇒ PV surplus not captured
-
-# ---- Battery power saturation heuristic (power-based) ----
-BATTERY_POWER_SATURATION_THRESHOLD_PCT = 5.0  # % of charging time at max power
-
-# ---- Battery saturation heuristics (time-based) ----
-# Percentage of time the battery is constrained
-BATTERY_SATURATION_EMPTY_THRESHOLD_PCT = 25   # % of time battery is empty
-BATTERY_SATURATION_FULL_THRESHOLD_PCT  = 25   # % of time battery is full
-
-# ---- Battery activity heuristic (energy-based) ----
-# Minimum charged energy over a period to consider the battery capacity-limited
-BATTERY_MIN_CHARGE_ACTIVITY_FRACTION = 0.2    # fraction of one full battery cycle
-
 # Total battery capacity (all phases)
 battery_capacity_total_kwh = sum(battery_capacity_Wh) / 1000
-
-# Minimum kWh charged over the period to rule out "PV-limited" diagnosis
-BATTERY_MIN_CHARGE_ACTIVITY_KWH = (
-    BATTERY_MIN_CHARGE_ACTIVITY_FRACTION * battery_capacity_total_kwh
-)
-# Threshold of un-captured PV surplus energy (kWh) over the period
-PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH = (
-    PV_SURPLUS_UNCAPTURED_THRESHOLD_FRACTION * battery_capacity_total_kwh
-)
-
 
 ###################################################################
 # FUNCTIONS
@@ -432,24 +406,23 @@ def compute_energy_and_rentability_from_df(df):
     consumed_without = {"A": {"HP": 0, "HC": 0}, "B": {"HP": 0, "HC": 0}, "C": {"HP": 0, "HC": 0}}
     consumed_with    = {"A": {"HP": 0, "HC": 0}, "B": {"HP": 0, "HC": 0}, "C": {"HP": 0, "HC": 0}}
 
-    for _, row in df.iterrows():
-        tarif = row["tariff_mode"]
+    for phase in PHASE_KEYS:
+        p = phase.lower()
 
-        for phase in PHASE_KEYS:
-            p = phase.lower()
+        no_batt = df[f"house_consumption_phase_{p}_Wh"]
+        with_batt = df[f"simulated_house_consumption_phase_{p}_Wh"]
+        tarif = df["tariff_mode"]
 
-            no_batt = row[f"house_consumption_phase_{p}_Wh"]
-            with_batt = row[f"simulated_house_consumption_phase_{p}_Wh"]
+        for t in ["HC", "HP"]:
+            mask = tarif == t
 
-            if no_batt < 0:
-                injected_without[phase][tarif] += abs(no_batt)
-            else:
-                consumed_without[phase][tarif] += no_batt
+            # WITHOUT battery
+            injected_without[phase][t] += abs(no_batt[mask & (no_batt < 0)].sum())
+            consumed_without[phase][t] += no_batt[mask & (no_batt > 0)].sum()
 
-            if with_batt < 0:
-                injected_with[phase][tarif] += abs(with_batt)
-            else:
-                consumed_with[phase][tarif] += with_batt
+            # WITH battery
+            injected_with[phase][t] += abs(with_batt[mask & (with_batt < 0)].sum())
+            consumed_with[phase][t] += with_batt[mask & (with_batt > 0)].sum()
 
     def wh_to_kwh(x):
         return round(x / 1000, 3)
@@ -708,38 +681,13 @@ def compute_seasonal_profitability(ranges):
         avg_full = mean(full_vals) if full_vals else None
         avg_empty = mean(empty_vals) if empty_vals else None
 
-        charged_kwh = data["energy"]["with_battery"]["battery_charged_kwh"]
-
-        power_sat_vals = [
-            m["battery_saturation"].get("charge_power_saturation_percent", 0)
+        scores = [
+            m["battery_saturation"].get("battery_sizing_score")
             for m in monthly
             if m["season"] == s
         ]
 
-        avg_power_sat = mean(power_sat_vals) if power_sat_vals else 0.0
-
-        if avg_power_sat > BATTERY_POWER_SATURATION_THRESHOLD_PCT:
-            diagnosis = "constraint_storage_power"
-
-        elif (
-            avg_full is not None
-            and avg_full > BATTERY_SATURATION_FULL_THRESHOLD_PCT
-            and data["energy"]["with_battery"]["grid_injected_kwh"]
-                > PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH
-        ):
-            diagnosis = "constraint_storage_energy_pv"
-
-        elif avg_empty is not None and avg_empty > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
-            if charged_kwh <= BATTERY_MIN_CHARGE_ACTIVITY_KWH:
-                diagnosis = "constraint_pv_energy"
-            else:
-                diagnosis = "constraint_storage_energy_load"
-
-        elif avg_full is not None and avg_full > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
-            diagnosis = "constraint_low_storage_need"
-
-        else:
-            diagnosis = "no_dominant_constraint"
+        average_score = mean(scores) if scores else None
 
         seasonal_summary[s] = {
             "months_count": len(gains),
@@ -748,8 +696,15 @@ def compute_seasonal_profitability(ranges):
             "energy_flows": round_nested(data["energy"], 2),
             "battery_saturation": {
                 "average_full_share_percent": round_value(avg_full, 1) if avg_full is not None else None,
-                "average_empty_share_percent": round_value(avg_empty, 1) if avg_empty is not None else None,
-                "diagnosis": diagnosis
+                "average_empty_share_percent": round_value(avg_empty, 1) if avg_empty is not None else None
+            },
+            "battery_sizing": {
+                "average_score": round_value(average_score, 1),
+                "interpretation": (
+                    "undersized" if average_score < 40 else
+                    "oversized" if average_score > 75 else
+                    "well_sized"
+                )
             }
         }
 
@@ -795,23 +750,31 @@ def compute_energy_flows_from_df(df):
     - battery_discharged_kwh
     """
 
-    grid_consumed = 0.0
-    grid_injected = 0.0
-    battery_charged = 0.0
-    battery_discharged = 0.0
+    grid_cols = [
+        "simulated_house_consumption_phase_a_Wh",
+        "simulated_house_consumption_phase_b_Wh",
+        "simulated_house_consumption_phase_c_Wh",
+    ]
 
-    for _, row in df.iterrows():
-        for p in ["a", "b", "c"]:
-            # grid side (with battery)
-            val = row[f"simulated_house_consumption_phase_{p}_Wh"]
-            if val > 0:
-                grid_consumed += val
-            else:
-                grid_injected += abs(val)
+    battery_charged_cols = [
+        "battery_charged_phase_A_Wh",
+        "battery_charged_phase_B_Wh",
+        "battery_charged_phase_C_Wh",
+    ]
 
-            # battery side (REAL battery energy)
-            battery_charged += row[f"battery_charged_phase_{p.upper()}_Wh"]
-            battery_discharged += row[f"battery_discharged_phase_{p.upper()}_Wh"]
+    battery_discharged_cols = [
+        "battery_discharged_phase_A_Wh",
+        "battery_discharged_phase_B_Wh",
+        "battery_discharged_phase_C_Wh",
+    ]
+
+    grid_vals = df[grid_cols]
+
+    grid_consumed = grid_vals[grid_vals > 0].sum().sum()
+    grid_injected = (-grid_vals[grid_vals < 0]).sum().sum()
+
+    battery_charged = df[battery_charged_cols].sum().sum()
+    battery_discharged = df[battery_discharged_cols].sum().sum()
 
     return {
         "grid_consumed_kwh": round_value(grid_consumed / 1000, 2),
@@ -860,6 +823,42 @@ def compute_battery_losses(energy_flows, charge_eff, discharge_eff):
     )
 
     return round_value(losses, 2)
+
+def compute_battery_sizing_score(df_day, battery_capacity_total_kwh):
+    """
+    Sweet-spot oriented sizing score (0..100)
+    """
+
+    # ---------- NIGHT SUCCESS ----------
+    night_ok = compute_night_success_ratio(df_day, battery_capacity_total_kwh)
+
+    # ---------- SUNSET SOC ----------
+    sunset_soc = compute_sunset_soc_ratio(df_day, battery_capacity_total_kwh)
+
+    # ---------- UNDERSIZE ----------
+    # Only undersized if:
+    # - battery empties during night
+    # - AND was full during PV window
+    if night_ok is False:
+        full_samples = 0
+        total = len(df_day) * len(PHASE_KEYS)
+
+        for phase in PHASE_KEYS:
+            full_samples += (df_day[f"battery_status_phase_{phase}"] == "full").sum()
+
+        was_full = (full_samples / total) > 0.1 if total > 0 else False
+
+        if was_full:
+            return 10.0   # clearly undersized
+        else:
+            return 40.0   # PV-limited, not battery-limited
+
+    # ---------- OVERSIZE ----------
+    if sunset_soc is not None and sunset_soc < 0.6:
+        return 60.0       # oversized (never really used)
+
+    # ---------- SWEET SPOT ----------
+    return 90.0
 
 def compute_battery_saturation_from_df(df):
     """
@@ -914,44 +913,73 @@ def compute_battery_saturation_from_df(df):
 
     grid_injected_kwh /= 1000
 
-    if charge_power_saturation_pct > BATTERY_POWER_SATURATION_THRESHOLD_PCT:
-        diagnosis = "constraint_storage_power"
+    period_score = compute_battery_sizing_score(
+        df,
+        battery_capacity_total_kwh
+    )
 
-    elif (
-        full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT
-        and grid_injected_kwh > PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH
-    ):
-        diagnosis = "constraint_storage_energy_pv"
-
-    elif empty_pct > BATTERY_SATURATION_EMPTY_THRESHOLD_PCT:
-        if charged_kwh <= BATTERY_MIN_CHARGE_ACTIVITY_KWH:
-            diagnosis = "constraint_pv_energy"
-        else:
-            diagnosis = "constraint_storage_energy_load"
-
-    elif full_pct > BATTERY_SATURATION_FULL_THRESHOLD_PCT:
-        diagnosis = "constraint_low_storage_need"
-
+    if period_score < 40:
+        diagnosis = "battery_undersized"
+    elif period_score > 75:
+        diagnosis = "battery_oversized"
     else:
-        diagnosis = "no_dominant_constraint"
+        diagnosis = "battery_well_sized"
 
     return {
         "battery_full_share_percent": round_value(full_pct, 1),
         "battery_empty_share_percent": round_value(empty_pct, 1),
         "charged_energy_kwh": round_value(charged_kwh, 2),
-        "min_activity_kwh_threshold": round_value(
-            BATTERY_MIN_CHARGE_ACTIVITY_KWH, 2
-        ),
         "charge_power_saturation_percent": round_value(
             charge_power_saturation_pct, 2
         ),
-        "power_saturation_threshold_percent": BATTERY_POWER_SATURATION_THRESHOLD_PCT,
         "grid_injected_kwh": round_value(grid_injected_kwh, 2),
-        "pv_surplus_uncaptured_threshold_kwh": round_value(
-            PV_SURPLUS_UNCAPTURED_THRESHOLD_KWH, 2
-        ),
+        "battery_sizing_score": period_score,
         "diagnosis": diagnosis
+        
     }
+
+def compute_sunset_soc_ratio(df_day, battery_capacity_total_kwh):
+    """
+    Returns average SOC ratio at sunset (0..1)
+    """
+    # Approximation sunset window (18h–20h)
+    sunset = df_day[
+        (df_day["timestamp"].dt.hour >= 18) &
+        (df_day["timestamp"].dt.hour <= 20)
+    ]
+
+    if sunset.empty:
+        return None
+
+    soc_wh = (
+        sunset[[f"battery_energy_phase_{p}_Wh" for p in PHASE_KEYS]]
+        .sum(axis=1)
+    )
+
+    soc_ratio = soc_wh / (battery_capacity_total_kwh * 1000)
+    return soc_ratio.mean()
+
+def compute_night_success_ratio(df_day, battery_capacity_total_kwh):
+    """
+    Returns True if battery does NOT empty before PV resumes (~08h)
+    """
+    night = df_day[
+        (df_day["timestamp"].dt.hour >= 20) |
+        (df_day["timestamp"].dt.hour <= 8)
+    ]
+
+    if night.empty:
+        return None
+
+    soc_wh = (
+        night[[f"battery_energy_phase_{p}_Wh" for p in PHASE_KEYS]]
+        .sum(axis=1)
+    )
+
+    min_soc_ratio = soc_wh.min() / (battery_capacity_total_kwh * 1000)
+
+    # success if battery never goes below 10 %
+    return min_soc_ratio > 0.10
 
 ###################################################################
 # MAIN
@@ -1058,19 +1086,19 @@ print("+ Successfully grouped data by timestamp")
 print("Filling missing timestamps with an average value between the values before and after the missing timestamp:")
 all_timestamps = pd.date_range(start=house_phase_a_start_timestamp, end=house_phase_a_end_timestamp, freq='min')
 house_phase_a = house_phase_a.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-house_phase_a["phase_a"] = house_phase_a["phase_a"].interpolate(method='linear').apply(lambda x: int(x))
+house_phase_a["phase_a"] = house_phase_a["phase_a"].interpolate(method="linear")
 print("+ Successfully filled missing timestamps in phase A")
 
 # Fill missing timestamps in phase B with an average value between the values before and after the missing timestamp
 all_timestamps = pd.date_range(start=house_phase_b_start_timestamp, end=house_phase_b_end_timestamp, freq='min')
 house_phase_b = house_phase_b.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-house_phase_b["phase_b"] = house_phase_b["phase_b"].interpolate(method='linear').apply(lambda x: int(x))
+house_phase_b["phase_b"] = house_phase_b["phase_b"].interpolate(method='linear')
 print("+ Successfully filled missing timestamps in phase B")
 
 # Fill missing timestamps in phase C with an average value between the values before and after the missing timestamp
 all_timestamps = pd.date_range(start=house_phase_c_start_timestamp, end=house_phase_c_end_timestamp, freq='min')
 house_phase_c = house_phase_c.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-house_phase_c["phase_c"] = house_phase_c["phase_c"].interpolate(method='linear').apply(lambda x: int(x))
+house_phase_c["phase_c"] = house_phase_c["phase_c"].interpolate(method='linear')
 print("+ Successfully filled missing timestamps in phase C")
 
 # Merge the 4 datasets based on the timestamp, filling missing values with 0
@@ -1094,8 +1122,8 @@ print(f"+ Merged - Timestamp: {merged_start_timestamp} to {merged_end_timestamp}
 
 # Number of days to process
 duration_days_global = max(
-    1,
-    (merged_end_timestamp - merged_start_timestamp).days
+    1.0,
+    (merged_end_timestamp - merged_start_timestamp).total_seconds() / 86400
 )
 
 print("Starting simulation...")
@@ -1144,7 +1172,6 @@ for i in range(total_steps):
 
     # List of phases and tariff modes
     phases = PHASE_KEYS
-    tariff_modes = ["HP", "HC"]
 
     # Process real energy consumption
     for phase, energy in zip(phases, [
@@ -1204,6 +1231,25 @@ battery_cycles_global = {
 
 # Build results DataFrame
 results_df = pd.DataFrame(results)
+
+# ===============================
+# DAILY BATTERY SIZING SCORE
+# ===============================
+results_df["date"] = results_df["timestamp"].dt.date
+
+daily_scores = []
+
+for day, df_day in results_df.groupby("date"):
+    score = compute_battery_sizing_score(
+        df_day,
+        battery_capacity_total_kwh
+    )
+    daily_scores.append({
+        "date": str(day),
+        "battery_sizing_score": score
+    })
+
+daily_sizing_df = pd.DataFrame(daily_scores)
 
 print("**********************************")
 print("******* Simulation results *******")
@@ -1466,8 +1512,8 @@ print_progress_bar(range_index, total_ranges, prefix="Ranges")
 # ---- Monthly ranges ----
 for (year, month), df_month in monthly_groups:
     duration_days_month = max(
-        1,
-        (df_month["timestamp"].max() - df_month["timestamp"].min()).days
+        1.0,
+        (df_month["timestamp"].max() - df_month["timestamp"].min()).total_seconds() / 86400
     )
 
     range_meta = build_range_metadata(df_month, duration_days_month)
