@@ -36,6 +36,10 @@ battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
 battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
 battery_max_cycles = 6000                       # Battery lifespan in cycles
 battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
+# ---- Battery usable SOC window ----
+battery_soc_min_pct = 10     # below this, discharge is forbidden
+battery_soc_max_pct = 100    # optional future-proof
+
 
 # ---- Electricity tariff configuration ----
 tariff_config = {
@@ -53,6 +57,16 @@ tariff_config = {
 
 # Total battery capacity (all phases)
 battery_capacity_total_kwh = sum(battery_capacity_Wh) / 1000
+# Initial energy in battery per phase (Wh)
+battery_capacity_usable_Wh = [
+    battery_capacity_Wh[i] * (battery_soc_max_pct - battery_soc_min_pct) / 100
+    for i in range(3)
+]
+
+battery_energy_min_Wh = [
+    battery_capacity_Wh[i] * battery_soc_min_pct / 100
+    for i in range(3)
+]
 
 ###################################################################
 # FUNCTIONS
@@ -106,13 +120,18 @@ def simulate_battery_behavior(house_grid_power_watts):
         if house_grid_power_watts[phase] < 0:
             # Inject into the grid, charge the battery with the surplus
             surplus_watts = abs(house_grid_power_watts[phase])
-            if energy_in_battery_Wh[phase] < battery_capacity_Wh[phase]:
+            if energy_in_battery_Wh[phase] < (
+                battery_capacity_Wh[phase] * battery_soc_max_pct / 100
+            ):
                 # Charge the battery if not full
                 charge_power_watts[phase] = min(surplus_watts, max_charge_power_watts[phase])
                 energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts[phase], 1) * battery_charge_efficiency
                 battery_energy_charged_Wh[phase] = energy_to_be_injected_in_battery_Wh
                 energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
-                energy_in_battery_Wh[phase] = min(energy_in_battery_Wh[phase], battery_capacity_Wh[phase])
+                energy_in_battery_Wh[phase] = min(
+                    energy_in_battery_Wh[phase],
+                    battery_capacity_Wh[phase] * battery_soc_max_pct / 100
+                )
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_injected_in_battery_Wh / battery_capacity_Wh[phase] / 2)
                 battery_status[phase] = "charging"
@@ -124,19 +143,37 @@ def simulate_battery_behavior(house_grid_power_watts):
             # Consume from the grid, discharge the battery to compensate
             deficit_watts = house_grid_power_watts[phase]
             discharge_power_watts[phase] = min(deficit_watts, max_discharge_power_watts[phase])
-            if energy_in_battery_Wh[phase] > 0:
+            if energy_in_battery_Wh[phase] > battery_energy_min_Wh[phase]:
                 # Discharge the battery if not empty
-                energy_to_be_consumed_from_battery_Wh = calculate_energy_Wh(discharge_power_watts[phase], 1) * (1 / battery_discharge_efficiency)
+                energy_to_be_consumed_from_battery_Wh = (
+                    calculate_energy_Wh(discharge_power_watts[phase], 1)
+                    * (1 / battery_discharge_efficiency)
+                )
+
+                max_dischargeable_Wh = (
+                    energy_in_battery_Wh[phase] - battery_energy_min_Wh[phase]
+                )
+
+                actual_discharge_Wh = min(
+                    energy_to_be_consumed_from_battery_Wh,
+                    max_dischargeable_Wh
+                )
+
+                energy_in_battery_Wh[phase] -= actual_discharge_Wh
+                energy_in_battery_Wh[phase] = max(
+                    energy_in_battery_Wh[phase],
+                    battery_energy_min_Wh[phase]
+                )
+
                 battery_energy_discharged_Wh[phase] = energy_to_be_consumed_from_battery_Wh
-                energy_in_battery_Wh[phase] -= energy_to_be_consumed_from_battery_Wh
-                energy_in_battery_Wh[phase] = max(0, energy_in_battery_Wh[phase])
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_consumed_from_battery_Wh / battery_capacity_Wh[phase] / 2)
                 battery_status[phase] = "discharging"
             else:
                 # No energy in the battery
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
-                battery_status[phase] = "empty"
+                battery_status[phase] = "empty"  # empty = reached SOC min
+
 
     return {
         "A": {
