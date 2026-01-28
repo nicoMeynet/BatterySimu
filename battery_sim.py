@@ -121,70 +121,60 @@ def simulate_battery_behavior(house_grid_power_watts):
     
     for phase in range(3):
         if house_grid_power_watts[phase] < 0:
-            # Inject into the grid, charge the battery with the surplus
             surplus_watts = abs(house_grid_power_watts[phase])
-            if energy_in_battery_Wh[phase] < (
-                battery_capacity_Wh[phase] * battery_soc_max_pct / 100
-            ):
-                # Charge the battery if not full
-                charge_power_watts[phase] = min(surplus_watts, max_charge_power_watts[phase])
-                energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts[phase], 1) * battery_charge_efficiency
-                battery_energy_charged_Wh[phase] = energy_to_be_injected_in_battery_Wh
-                prev_energy = energy_in_battery_Wh[phase]
 
-                energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
-                energy_in_battery_Wh[phase] = min(
-                    energy_in_battery_Wh[phase],
-                    battery_capacity_Wh[phase] * battery_soc_max_pct / 100
-                )
-                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts[phase]
-                battery_cycle[phase] = abs(energy_to_be_injected_in_battery_Wh / battery_capacity_Wh[phase] / 2)
+            # How much power we can actually charge
+            charge_power = min(surplus_watts, max_charge_power_watts[phase])
+
+            # Energies (1 minute)
+            energy_possible_Wh = calculate_energy_Wh(surplus_watts, 1)
+            energy_actual_Wh = calculate_energy_Wh(charge_power, 1)
+
+            # Remaining capacity (SOC limit)
+            soc_max_Wh = battery_capacity_Wh[phase] * battery_soc_max_pct / 100
+            energy_can_store_Wh = max(0.0, soc_max_Wh - energy_in_battery_Wh[phase]) / battery_charge_efficiency
+
+            charged_Wh = min(energy_actual_Wh, energy_can_store_Wh)
+
+            if charged_Wh > 0:
+                energy_in_battery_Wh[phase] += charged_Wh * battery_charge_efficiency
+                battery_energy_charged_Wh[phase] = charged_Wh * battery_charge_efficiency
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power
+                battery_cycle[phase] = abs(charged_Wh / battery_capacity_Wh[phase] / 2)
             else:
-                # Battery already full → missed charging opportunity
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
 
-                injected_watts = abs(house_grid_power_watts[phase])
-                charge_headroom_Wh[phase] += calculate_energy_Wh(injected_watts, 1)
+            # 🔥 HEADROOM = what could NOT be stored
+            missed_charge_Wh = energy_possible_Wh - charged_Wh
+            if missed_charge_Wh > 0:
+                charge_headroom_Wh[phase] += missed_charge_Wh
 
         else:
-            # Consume from the grid, discharge the battery to compensate
             deficit_watts = house_grid_power_watts[phase]
-            discharge_power_watts[phase] = min(deficit_watts, max_discharge_power_watts[phase])
-            if energy_in_battery_Wh[phase] > battery_energy_min_Wh[phase]:
-                # Discharge the battery if not empty
-                energy_to_be_consumed_from_battery_Wh = (
-                    calculate_energy_Wh(discharge_power_watts[phase], 1)
-                    * (1 / battery_discharge_efficiency)
-                )
 
-                max_dischargeable_Wh = (
-                    energy_in_battery_Wh[phase] - battery_energy_min_Wh[phase]
-                )
+            discharge_power = min(deficit_watts, max_discharge_power_watts[phase])
 
-                actual_discharge_Wh = min(
-                    energy_to_be_consumed_from_battery_Wh,
-                    max_dischargeable_Wh
-                )
+            energy_possible_Wh = calculate_energy_Wh(deficit_watts, 1)
+            energy_actual_Wh = calculate_energy_Wh(discharge_power, 1)
 
-                energy_in_battery_Wh[phase] -= actual_discharge_Wh
-                energy_in_battery_Wh[phase] = max(
-                    energy_in_battery_Wh[phase],
-                    battery_energy_min_Wh[phase]
-                )
+            energy_available_Wh = (
+                energy_in_battery_Wh[phase] - battery_energy_min_Wh[phase]
+            ) * battery_discharge_efficiency
 
+            actual_discharge_Wh = min(energy_actual_Wh, energy_available_Wh)
+
+            if actual_discharge_Wh > 0:
+                energy_in_battery_Wh[phase] -= actual_discharge_Wh / battery_discharge_efficiency
                 battery_energy_discharged_Wh[phase] = actual_discharge_Wh
-                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts[phase]
-                battery_cycle[phase] = abs(energy_to_be_consumed_from_battery_Wh / battery_capacity_Wh[phase] / 2)
-
+                new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power
+                battery_cycle[phase] = abs(actual_discharge_Wh / battery_capacity_Wh[phase] / 2)
             else:
-                # Battery empty → missed discharge opportunity
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
-                deficit_watts = house_grid_power_watts[phase]
-                usable_watts = min(deficit_watts, max_discharge_power_watts[phase])
-                discharge_headroom_Wh[phase] += calculate_energy_Wh(
-                    usable_watts * battery_discharge_efficiency,
-                    1
-                )
+
+            # 🔥 HEADROOM = what could NOT be delivered
+            missed_discharge_Wh = energy_possible_Wh - actual_discharge_Wh
+            if missed_discharge_Wh > 0:
+                discharge_headroom_Wh[phase] += missed_discharge_Wh
 
         # --------------------------------------------------
         # FINAL BATTERY STATUS (SOC HAS PRIORITY)
@@ -689,7 +679,8 @@ def compute_seasonal_profitability(ranges):
             "season": month_to_season(start.month),
             "gain_chf": round_value(gain),
             "energy_flows": energy_flows,
-            "battery_saturation": compute_battery_saturation_from_df(rng["_df"])
+            "battery_saturation": compute_battery_saturation_from_df(rng["_df"]),
+            "battery_headroom": rng["results"]["battery"]["headroom"],
         })
 
         # ---- Daily undersize detection ----
@@ -770,8 +761,19 @@ def compute_seasonal_profitability(ranges):
             "daily_evening_undersize": {
                 "undersized_days": 0,
                 "total_days": 0
+            },
+            "battery_headroom": {
+                "charge_kwh": 0.0,
+                "discharge_kwh": 0.0
             }
         })
+
+        seasons[s]["gains"].append(m["gain_chf"])
+
+        headroom = m.get("battery_headroom")
+        if headroom:
+            seasons[s]["battery_headroom"]["charge_kwh"] += headroom["charge_headroom_kwh"]
+            seasons[s]["battery_headroom"]["discharge_kwh"] += headroom["discharge_headroom_kwh"]
 
         seasons[s]["gains"].append(m["gain_chf"])
 
@@ -816,33 +818,27 @@ def compute_seasonal_profitability(ranges):
         undersize_days = data["daily_energy_undersize"]["undersized_days"]
         total_days = data["daily_energy_undersize"]["total_days"]
 
-        energy_pct = (
-            data["daily_energy_undersize"]["undersized_days"]
-            / data["daily_energy_undersize"]["total_days"] * 100
-            if data["daily_energy_undersize"]["total_days"] > 0 else 0
-        )
+        charge = data["battery_headroom"]["charge_kwh"]
+        discharge = data["battery_headroom"]["discharge_kwh"]
 
-        evening_pct = (
-            data["daily_evening_undersize"]["undersized_days"]
-            / data["daily_evening_undersize"]["total_days"] * 100
-            if data["daily_evening_undersize"]["total_days"] > 0 else 0
-        )
+        net = discharge - charge
 
-        if energy_pct > 20:
-            sizing_score = 30.0
+        if net > +200:
+            sizing_score = 25.0
             diagnosis = "battery_undersized"
 
-        elif energy_pct <= 10 and evening_pct > 25:
-            sizing_score = 70.0
-            diagnosis = "battery_evening_limited"
+        elif net > +50:
+            sizing_score = 50.0
+            diagnosis = "battery_slightly_undersized"
 
-        elif energy_pct <= 10 and evening_pct <= 15:
+        elif abs(net) <= 50:
             sizing_score = 90.0
             diagnosis = "battery_well_sized"
 
-        else:
+        elif net < -50:
             sizing_score = 60.0
             diagnosis = "battery_oversized"
+
 
         seasonal_summary[s] = {
             "months_count": len(gains),
@@ -870,7 +866,33 @@ def compute_seasonal_profitability(ranges):
                     if data["daily_evening_undersize"]["total_days"] > 0 else 0,
                     1
                 )
-            }
+            },
+            "battery_headroom": {
+                "charge_headroom_kwh": round_value(
+                    data["battery_headroom"]["charge_kwh"], 2
+                ),
+                "discharge_headroom_kwh": round_value(
+                    data["battery_headroom"]["discharge_kwh"], 2
+                ),
+                "net_headroom_kwh": round_value(
+                    data["battery_headroom"]["discharge_kwh"]
+                    - data["battery_headroom"]["charge_kwh"],
+                    2
+                )
+            },
+            "battery_sizing": {
+                "score": sizing_score,
+                "diagnosis": diagnosis,
+                "method": "seasonal_headroom"
+            },
+        }
+        charge = data["battery_headroom"]["charge_kwh"]
+        discharge = data["battery_headroom"]["discharge_kwh"]
+
+        seasonal_summary[s]["battery_headroom"] = {
+            "charge_headroom_kwh": round_value(charge, 2),
+            "discharge_headroom_kwh": round_value(discharge, 2),
+            "net_headroom_kwh": round_value(discharge - charge, 2)
         }
 
     return {
