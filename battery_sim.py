@@ -116,6 +116,9 @@ def simulate_battery_behavior(house_grid_power_watts):
     discharge_power_watts = [0, 0, 0]
     battery_energy_charged_Wh = [0.0, 0.0, 0.0]
     battery_energy_discharged_Wh = [0.0, 0.0, 0.0]
+    charge_headroom_Wh = [0.0, 0.0, 0.0]
+    discharge_headroom_Wh = [0.0, 0.0, 0.0]
+    
     for phase in range(3):
         if house_grid_power_watts[phase] < 0:
             # Inject into the grid, charge the battery with the surplus
@@ -127,6 +130,8 @@ def simulate_battery_behavior(house_grid_power_watts):
                 charge_power_watts[phase] = min(surplus_watts, max_charge_power_watts[phase])
                 energy_to_be_injected_in_battery_Wh = calculate_energy_Wh(charge_power_watts[phase], 1) * battery_charge_efficiency
                 battery_energy_charged_Wh[phase] = energy_to_be_injected_in_battery_Wh
+                prev_energy = energy_in_battery_Wh[phase]
+
                 energy_in_battery_Wh[phase] += energy_to_be_injected_in_battery_Wh
                 energy_in_battery_Wh[phase] = min(
                     energy_in_battery_Wh[phase],
@@ -134,11 +139,13 @@ def simulate_battery_behavior(house_grid_power_watts):
                 )
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] + charge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_injected_in_battery_Wh / battery_capacity_Wh[phase] / 2)
-                battery_status[phase] = "charging"
             else:
-                # Battery full
+                # Battery already full → missed charging opportunity
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
-                battery_status[phase] = "full"
+
+                injected_watts = abs(house_grid_power_watts[phase])
+                charge_headroom_Wh[phase] += calculate_energy_Wh(injected_watts, 1)
+
         else:
             # Consume from the grid, discharge the battery to compensate
             deficit_watts = house_grid_power_watts[phase]
@@ -165,14 +172,40 @@ def simulate_battery_behavior(house_grid_power_watts):
                     battery_energy_min_Wh[phase]
                 )
 
-                battery_energy_discharged_Wh[phase] = energy_to_be_consumed_from_battery_Wh
+                battery_energy_discharged_Wh[phase] = actual_discharge_Wh
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase] - discharge_power_watts[phase]
                 battery_cycle[phase] = abs(energy_to_be_consumed_from_battery_Wh / battery_capacity_Wh[phase] / 2)
-                battery_status[phase] = "discharging"
+
             else:
-                # No energy in the battery
+                # Battery empty → missed discharge opportunity
                 new_house_grid_power_watts[phase] = house_grid_power_watts[phase]
-                battery_status[phase] = "empty"  # empty = reached SOC min
+                deficit_watts = house_grid_power_watts[phase]
+                usable_watts = min(deficit_watts, max_discharge_power_watts[phase])
+                discharge_headroom_Wh[phase] += calculate_energy_Wh(
+                    usable_watts * battery_discharge_efficiency,
+                    1
+                )
+
+        # --------------------------------------------------
+        # FINAL BATTERY STATUS (SOC HAS PRIORITY)
+        # --------------------------------------------------
+        soc_max_Wh = battery_capacity_Wh[phase] * battery_soc_max_pct / 100
+        soc_min_Wh = battery_energy_min_Wh[phase]
+
+        if energy_in_battery_Wh[phase] >= soc_max_Wh * 0.99:
+            battery_status[phase] = "full"
+
+        elif energy_in_battery_Wh[phase] <= soc_min_Wh:
+            battery_status[phase] = "empty"
+
+        elif charge_power_watts[phase] > 0:
+            battery_status[phase] = "charging"
+
+        elif discharge_power_watts[phase] > 0:
+            battery_status[phase] = "discharging"
+
+        else:
+            battery_status[phase] = "idle"
 
 
     return {
@@ -184,7 +217,9 @@ def simulate_battery_behavior(house_grid_power_watts):
             "charge_power_watts": charge_power_watts[0],
             "discharge_power_watts": discharge_power_watts[0],
             "battery_energy_charged_Wh": battery_energy_charged_Wh[0],
-            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[0]
+            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[0],
+            "charge_headroom_Wh": charge_headroom_Wh[0],
+            "discharge_headroom_Wh": discharge_headroom_Wh[0]
         },
         "B": {
             "new_house_grid_power_watts": new_house_grid_power_watts[1],
@@ -194,7 +229,9 @@ def simulate_battery_behavior(house_grid_power_watts):
             "charge_power_watts": charge_power_watts[1],
             "discharge_power_watts": discharge_power_watts[1],
             "battery_energy_charged_Wh": battery_energy_charged_Wh[1],
-            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[1]
+            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[1],
+            "charge_headroom_Wh": charge_headroom_Wh[1],
+            "discharge_headroom_Wh": discharge_headroom_Wh[1]
         },
         "C": {
             "new_house_grid_power_watts": new_house_grid_power_watts[2],
@@ -204,7 +241,9 @@ def simulate_battery_behavior(house_grid_power_watts):
             "charge_power_watts": charge_power_watts[2],
             "discharge_power_watts": discharge_power_watts[2],
             "battery_energy_charged_Wh": battery_energy_charged_Wh[2],
-            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[2]
+            "battery_energy_discharged_Wh": battery_energy_discharged_Wh[2],
+            "charge_headroom_Wh": charge_headroom_Wh[2],
+            "discharge_headroom_Wh": discharge_headroom_Wh[2]
         }
     }
 
@@ -308,7 +347,7 @@ def compute_battery_status(df):
                 "sample_count": int((df[col] == status).sum()),
                 "samples_percent": round((df[col] == status).sum() / total * 100, 2)
             }
-            for status in ["full", "empty", "charging", "discharging"]
+            for status in ["full", "empty", "charging", "discharging", "idle"]
         }
 
     return {
@@ -427,7 +466,8 @@ def build_canonical_results(
                 df,
                 max_charge_power_watts,
                 max_discharge_power_watts
-            )
+            ),
+            "headroom": compute_battery_headroom_from_df(df),
         }
     }
 
@@ -1157,6 +1197,28 @@ def compute_daily_evening_undersize(df_day):
 
     return was_full and became_empty
 
+def compute_battery_headroom_from_df(df):
+    charge_cols = [
+        "battery_charge_headroom_phase_A_Wh",
+        "battery_charge_headroom_phase_B_Wh",
+        "battery_charge_headroom_phase_C_Wh",
+    ]
+
+    discharge_cols = [
+        "battery_discharge_headroom_phase_A_Wh",
+        "battery_discharge_headroom_phase_B_Wh",
+        "battery_discharge_headroom_phase_C_Wh",
+    ]
+
+    charge_Wh = df[charge_cols].sum().sum()
+    discharge_Wh = df[discharge_cols].sum().sum()
+
+    return {
+        "charge_headroom_kwh": round_value(charge_Wh / 1000, 2),
+        "discharge_headroom_kwh": round_value(discharge_Wh / 1000, 2),
+        "net_headroom_kwh": round_value((discharge_Wh - charge_Wh) / 1000, 2)
+    }
+
 ###################################################################
 # MAIN
 ###################################################################
@@ -1393,7 +1455,12 @@ for i in range(total_steps):
         "battery_discharged_phase_A_Wh": sim_result["A"]["battery_energy_discharged_Wh"],
         "battery_discharged_phase_B_Wh": sim_result["B"]["battery_energy_discharged_Wh"],
         "battery_discharged_phase_C_Wh": sim_result["C"]["battery_energy_discharged_Wh"],
-
+        "battery_charge_headroom_phase_A_Wh": sim_result["A"]["charge_headroom_Wh"],
+        "battery_charge_headroom_phase_B_Wh": sim_result["B"]["charge_headroom_Wh"],
+        "battery_charge_headroom_phase_C_Wh": sim_result["C"]["charge_headroom_Wh"],
+        "battery_discharge_headroom_phase_A_Wh": sim_result["A"]["discharge_headroom_Wh"],
+        "battery_discharge_headroom_phase_B_Wh": sim_result["B"]["discharge_headroom_Wh"],
+        "battery_discharge_headroom_phase_C_Wh": sim_result["C"]["discharge_headroom_Wh"],
     })
 
 print("\n+ Successfully simulated battery behavior")
@@ -1470,7 +1537,12 @@ print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
 
 print("")
 print("Rentability:")
-print(f"+ Total gain: {total_gain_CHF} CHF for {duration_days_global} days or per year: {total_gain_CHF / duration_days_global * 365:.0f} CHF (extrapolated)")
+days_int = int(duration_days_global)
+print(
+    f"+ Total gain: {total_gain_CHF} CHF over {days_int} calendar days "
+    f"(≈ {total_gain_CHF / duration_days_global * 365:.0f} CHF/year)"
+)
+
 if total_gain_CHF > 0:
     print(
         f"+ Amortization time: "
