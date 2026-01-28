@@ -821,25 +821,6 @@ def compute_seasonal_profitability(ranges):
         charge = data["battery_headroom"]["charge_kwh"]
         discharge = data["battery_headroom"]["discharge_kwh"]
 
-        net = discharge - charge
-
-        if net > +200:
-            sizing_score = 25.0
-            diagnosis = "battery_undersized"
-
-        elif net > +50:
-            sizing_score = 50.0
-            diagnosis = "battery_slightly_undersized"
-
-        elif abs(net) <= 50:
-            sizing_score = 90.0
-            diagnosis = "battery_well_sized"
-
-        elif net < -50:
-            sizing_score = 60.0
-            diagnosis = "battery_oversized"
-
-
         seasonal_summary[s] = {
             "months_count": len(gains),
             "total_gain_chf": round_value(sum(gains), 2),
@@ -879,20 +860,14 @@ def compute_seasonal_profitability(ranges):
                     - data["battery_headroom"]["charge_kwh"],
                     2
                 )
-            },
-            "battery_sizing": {
-                "score": sizing_score,
-                "diagnosis": diagnosis,
-                "method": "seasonal_headroom"
-            },
+            }
         }
         charge = data["battery_headroom"]["charge_kwh"]
         discharge = data["battery_headroom"]["discharge_kwh"]
 
         seasonal_summary[s]["battery_headroom"] = {
             "charge_headroom_kwh": round_value(charge, 2),
-            "discharge_headroom_kwh": round_value(discharge, 2),
-            "net_headroom_kwh": round_value(discharge - charge, 2)
+            "discharge_headroom_kwh": round_value(discharge, 2)
         }
 
     return {
@@ -1238,7 +1213,6 @@ def compute_battery_headroom_from_df(df):
     return {
         "charge_headroom_kwh": round_value(charge_Wh / 1000, 2),
         "discharge_headroom_kwh": round_value(discharge_Wh / 1000, 2),
-        "net_headroom_kwh": round_value((discharge_Wh - charge_Wh) / 1000, 2)
     }
 
 ###################################################################
