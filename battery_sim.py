@@ -20,14 +20,14 @@ import calendar
 ###################################################################
 # CONFIGURATION
 ###################################################################
-PHASE_KEYS = ["A", "B", "C"]
+
 # ---- Battery parameters ----
 #battery_capacity_Wh = [2880, 2880, 2880]        # Battery capacity per phase (Wh)
 #battery_cost = 3270                             # Battery cost (CHF)
-battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
-battery_cost = 4800                             # Battery cost (CHF)
-#battery_capacity_Wh = [8640, 8640, 8640]        # Battery capacity per phase (Wh)
-#battery_cost = 7500                             # Battery cost (CHF)
+#battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
+#battery_cost = 4800                             # Battery cost (CHF)
+battery_capacity_Wh = [8640, 8640, 8640]        # Battery capacity per phase (Wh)
+battery_cost = 7500                             # Battery cost (CHF)
 #battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
 #battery_cost = 9600                             # Battery cost (CHF)
 max_charge_power_watts = [2400, 2400, 2400]     # Max charge power per phase (W)
@@ -55,6 +55,11 @@ tariff_config = {
     }
 }
 
+
+#####################################################################
+# DERIVED CONSTANTS
+#####################################################################
+PHASE_KEYS = ["A", "B", "C"]
 # Total battery capacity (all phases)
 battery_capacity_total_kwh = sum(battery_capacity_Wh) / 1000
 # Initial energy in battery per phase (Wh)
@@ -62,7 +67,6 @@ battery_capacity_usable_Wh = [
     battery_capacity_Wh[i] * (battery_soc_max_pct - battery_soc_min_pct) / 100
     for i in range(3)
 ]
-
 battery_energy_min_Wh = [
     battery_capacity_Wh[i] * battery_soc_min_pct / 100
     for i in range(3)
@@ -125,6 +129,7 @@ def simulate_battery_behavior(house_grid_power_watts):
 
             # How much power we can actually charge
             charge_power = min(surplus_watts, max_charge_power_watts[phase])
+            charge_power_watts[phase] = charge_power
 
             # Energies (1 minute)
             energy_possible_Wh = calculate_energy_Wh(surplus_watts, 1)
@@ -153,6 +158,7 @@ def simulate_battery_behavior(house_grid_power_watts):
             deficit_watts = house_grid_power_watts[phase]
 
             discharge_power = min(deficit_watts, max_discharge_power_watts[phase])
+            discharge_power_watts[phase] = discharge_power
 
             energy_possible_Wh = calculate_energy_Wh(deficit_watts, 1)
             energy_actual_Wh = calculate_energy_Wh(discharge_power, 1)
@@ -188,15 +194,17 @@ def simulate_battery_behavior(house_grid_power_watts):
         elif energy_in_battery_Wh[phase] <= soc_min_Wh:
             battery_status[phase] = "empty"
 
-        elif charge_power_watts[phase] > 0:
+        elif charge_power_watts[phase] > 0 and battery_energy_charged_Wh[phase] > 0:
             battery_status[phase] = "charging"
 
-        elif discharge_power_watts[phase] > 0:
+        elif discharge_power_watts[phase] > 0 and battery_energy_discharged_Wh[phase] > 0:
             battery_status[phase] = "discharging"
+
+        elif charge_power_watts[phase] > 0 or discharge_power_watts[phase] > 0:
+            battery_status[phase] = "blocked"   # SOC or limits prevented action
 
         else:
             battery_status[phase] = "idle"
-
 
     return {
         "A": {
@@ -237,6 +245,7 @@ def simulate_battery_behavior(house_grid_power_watts):
         }
     }
 
+# ---- JSON Report Building ----
 def build_configuration_section():
     return {
         "battery": {
@@ -263,6 +272,7 @@ def build_configuration_section():
         }
     }
 
+# ---- JSON Report Helpers ----
 def compute_configuration_hash(configuration: dict) -> str:
     """
     Compute a deterministic SHA-256 hash of the configuration.
@@ -278,6 +288,7 @@ def compute_configuration_hash(configuration: dict) -> str:
     )
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
+#---- JSON Report Builder ----
 def build_json_report(simulation_ranges, seasonal_profitability=None):
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
@@ -299,6 +310,7 @@ def build_json_report(simulation_ranges, seasonal_profitability=None):
         }
     }
 
+#---- JSON Report Exporter ----
 def export_json_report(report, filename="simulation_report.json"):
     with open(filename, "w") as f:
         json.dump(report, f, indent=2)
@@ -347,19 +359,20 @@ def compute_battery_status(df):
         "samples_analyzed": len(df)
     }
 
-def compute_power_at_peak(df, max_charge_power_watts, max_discharge_power_watts):
+def compute_power_saturation(df, max_charge_power_watts, max_discharge_power_watts):
     def power_stats(col, max_power):
-        total = len(df[df[col] != 0])
+        mask = df[col] != 0
+        total = len(df[mask])
+
         if total == 0:
             return {
-                "data_available": False,
                 "at_max": {"sample_count": 0, "samples_percent": 0.0},
                 "not_at_max": {"sample_count": 0, "samples_percent": 0.0}
             }
 
         at_max = (df[col] == max_power).sum()
+
         return {
-            "data_available": True,
             "at_max": {
                 "sample_count": int(at_max),
                 "samples_percent": round(at_max / total * 100, 2)
@@ -452,10 +465,14 @@ def build_canonical_results(
                 battery_max_cycles
             ),
             "status": compute_battery_status(df),
-            "power_at_peak": compute_power_at_peak(
-                df,
-                max_charge_power_watts,
-                max_discharge_power_watts
+            "power_saturation": (
+                compute_power_saturation(
+                    df,
+                    max_charge_power_watts,
+                    max_discharge_power_watts
+                )
+                if cycles is not None or duration_days >= 7
+                else None
             ),
             "headroom": compute_battery_headroom_from_df(df),
         }
