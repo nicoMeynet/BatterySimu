@@ -15,62 +15,16 @@ import hashlib
 from datetime import datetime, UTC
 from statistics import mean, stdev
 import calendar
+from pathlib import Path
 
-
-###################################################################
-# CONFIGURATION
-###################################################################
-
-# ---- Battery parameters ----
-#battery_capacity_Wh = [2880, 2880, 2880]        # Battery capacity per phase (Wh)
-#battery_cost = 3270                             # Battery cost (CHF)
-#battery_capacity_Wh = [5760, 5760, 5760]        # Battery capacity per phase (Wh)
-#battery_cost = 4800                             # Battery cost (CHF)
-battery_capacity_Wh = [8640, 8640, 8640]        # Battery capacity per phase (Wh)
-battery_cost = 7500                             # Battery cost (CHF)
-#battery_capacity_Wh = [11520, 11520, 11520]     # Battery capacity per phase (Wh)
-#battery_cost = 9600                             # Battery cost (CHF)
-max_charge_power_watts = [2400, 2400, 2400]     # Max charge power per phase (W)
-max_discharge_power_watts = [2400, 2400, 2400]  # Max discharge power per phase (W)
-battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
-battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
-battery_max_cycles = 6000                       # Battery lifespan in cycles
-battery_soc = [100, 100, 100]                   # Initial state of charge in % (when the simulation starts)
-# ---- Battery usable SOC window ----
-battery_soc_min_pct = 10     # below this, discharge is forbidden
-battery_soc_max_pct = 100    # optional future-proof
-
-
-# ---- Electricity tariff configuration ----
-tariff_config = {
-    "peak": {
-        "tariff_consume": 0.34,      # CHF/kWh
-        "tariff_inject": 0.06,       # CHF/kWh
-        "days": [0, 1, 2, 3, 4],     # 0:Monday to 4:Friday
-        "hours": range(17, 22)       # 5 PM to 10 PM
-    },
-    "off_peak": {
-        "tariff_consume": 0.34,      # CHF/kWh for the rest of the time
-        "tariff_inject": 0.06        # CHF/kWh for the rest of the time
-    }
-}
-
-
-#####################################################################
-# DERIVED CONSTANTS
-#####################################################################
 PHASE_KEYS = ["A", "B", "C"]
-# Total battery capacity (all phases)
-battery_capacity_total_kwh = sum(battery_capacity_Wh) / 1000
-# Initial energy in battery per phase (Wh)
-battery_capacity_usable_Wh = [
-    battery_capacity_Wh[i] * (battery_soc_max_pct - battery_soc_min_pct) / 100
-    for i in range(3)
-]
-battery_energy_min_Wh = [
-    battery_capacity_Wh[i] * battery_soc_min_pct / 100
-    for i in range(3)
-]
+
+#####################################################################
+# LOAD CONFIG FROM FILE
+#####################################################################
+def load_config(path: str) -> dict:
+    with open(path, "r") as f:
+        return json.load(f)
 
 ###################################################################
 # FUNCTIONS
@@ -247,30 +201,7 @@ def simulate_battery_behavior(house_grid_power_watts):
 
 # ---- JSON Report Building ----
 def build_configuration_section():
-    return {
-        "battery": {
-            "capacity_Wh_per_phase": battery_capacity_Wh,
-            "cost_chf": battery_cost,
-            "max_charge_power_W_per_phase": max_charge_power_watts,
-            "max_discharge_power_W_per_phase": max_discharge_power_watts,
-            "charge_efficiency": battery_charge_efficiency,
-            "discharge_efficiency": battery_discharge_efficiency,
-            "max_cycles": battery_max_cycles,
-            "initial_soc_percent_per_phase": battery_soc
-        },
-        "tariff": {
-            "peak": {
-                "tariff_consume_chf_per_kwh": tariff_config["peak"]["tariff_consume"],
-                "tariff_inject_chf_per_kwh": tariff_config["peak"]["tariff_inject"],
-                "weekdays": tariff_config["peak"]["days"],
-                "hours": list(tariff_config["peak"]["hours"])
-            },
-            "off_peak": {
-                "tariff_consume_chf_per_kwh": tariff_config["off_peak"]["tariff_consume"],
-                "tariff_inject_chf_per_kwh": tariff_config["off_peak"]["tariff_inject"]
-            }
-        }
-    }
+    return config
 
 # ---- JSON Report Helpers ----
 def compute_configuration_hash(configuration: dict) -> str:
@@ -1244,20 +1175,55 @@ parser.add_argument("house_phase_a", help="CSV file for phase A")
 parser.add_argument("house_phase_b", help="CSV file for phase B")
 parser.add_argument("house_phase_c", help="CSV file for phase C")
 
-# Optional exports
 parser.add_argument(
-    "--export-csv",
-    metavar="FILE",
-    help="Export per-timestep simulation results to CSV"
-)
-
-parser.add_argument(
-    "--export-json",
-    metavar="FILE",
-    help="Export full aggregated simulation report to JSON"
+    "--config",
+    default="config.json",
+    help="Simulation configuration file (JSON)"
 )
 
 args = parser.parse_args()
+config = load_config(args.config)
+
+# ---- Output files ----
+config_path = Path(args.config)
+run_id = config_path.stem      # e.g. "config_4kwh"
+output_dir = Path("out")
+output_dir.mkdir(exist_ok=True)
+csv_output_file = output_dir / f"{run_id}.csv"
+json_output_file = output_dir / f"{run_id}.json"
+
+
+# ---- Battery configuration ----
+battery_cfg = config["battery"]
+
+battery_capacity_Wh = battery_cfg["capacity_Wh_per_phase"]
+battery_cost = battery_cfg["cost_chf"]
+max_charge_power_watts = battery_cfg["max_charge_power_watts"]
+max_discharge_power_watts = battery_cfg["max_discharge_power_watts"]
+battery_charge_efficiency = battery_cfg["charge_efficiency"]
+battery_discharge_efficiency = battery_cfg["discharge_efficiency"]
+battery_max_cycles = battery_cfg["max_cycles"]
+battery_soc = battery_cfg["initial_soc_percent_per_phase"]
+battery_soc_min_pct = battery_cfg["soc_min_pct"]
+battery_soc_max_pct = battery_cfg["soc_max_pct"]
+
+# ---- Tariff configuration ----
+tariff_config = config["tariff"]
+
+# -----------------------------
+# DERIVED CONSTANTS (after config)
+# -----------------------------
+battery_capacity_total_kwh = sum(battery_capacity_Wh) / 1000
+
+battery_capacity_usable_Wh = [
+    battery_capacity_Wh[i] * (battery_soc_max_pct - battery_soc_min_pct) / 100
+    for i in range(3)
+]
+
+battery_energy_min_Wh = [
+    battery_capacity_Wh[i] * battery_soc_min_pct / 100
+    for i in range(3)
+]
 
 house_phase_a_file = args.house_phase_a
 house_phase_b_file = args.house_phase_b
@@ -1731,13 +1697,6 @@ print(tabulate(charging_discharging_power_data, headers, tablefmt="grid"))
 
 print("")
 
-# Convert results to DataFrame and export to CSV
-print("**********************************")
-if args.export_csv:
-    print("Exporting CSV simulation results...")
-    results_df.to_csv(args.export_csv, index=False)
-    print(f"+ CSV simulation results exported to {args.export_csv}")
-
 # ===============================
 # BUILD SIMULATION RANGES
 # ===============================
@@ -1805,20 +1764,30 @@ for (year, month), df_month in monthly_groups:
     range_index += 1
     print_progress_bar(range_index, total_ranges, prefix="Ranges")
 
-print()  # newline after progress bar
-
+print()
 # ===============================
 # SEASONAL PROFITABILITY
 # ===============================
+print()
+print("Computing seasonal profitability...")
 seasonal_profitability = compute_seasonal_profitability(ranges)
+
+# ===============================
+# EXPORT CSV
+# ===============================
+print()
+print("Exporting CSV report...")
+results_df.to_csv(csv_output_file, index=False)
+print(f"+ CSV exported to {csv_output_file}")
 
 # ===============================
 # EXPORT JSON
 # ===============================
-if args.export_json:
-    print("Exporting JSON report...")
-    json_report = build_json_report(
-        simulation_ranges=ranges,
-        seasonal_profitability=seasonal_profitability
-    )
-    export_json_report(json_report, args.export_json)
+print()
+print("Exporting JSON report...")
+json_report = build_json_report(
+    simulation_ranges=ranges,
+    seasonal_profitability=seasonal_profitability
+)
+export_json_report(json_report, json_output_file)
+
