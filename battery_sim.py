@@ -335,7 +335,7 @@ def build_battery_statistics(
         "cycle_definition": "1.0 = full charge + discharge",
         "cycles_scope": "global_only" if cycles is not None else "not_applicable",
         "max_cycles": battery_max_cycles,
-        "remaining_energy_Wh": {
+        "remaining_energy_above_min_Wh": {
             phase: round_value(df[f"battery_energy_phase_{phase}_Wh"].iloc[-1], 1)
             for phase in PHASE_KEYS
         }
