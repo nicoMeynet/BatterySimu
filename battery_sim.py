@@ -723,8 +723,6 @@ def compute_seasonal_profitability(ranges):
             seasons[s]["battery_headroom"]["charge_kwh"] += headroom["charge_headroom_kwh"]
             seasons[s]["battery_headroom"]["discharge_kwh"] += headroom["discharge_headroom_kwh"]
 
-        seasons[s]["gains"].append(m["gain_chf"])
-
         ef = m["energy_flows"]
 
         sat = m.get("battery_saturation")
