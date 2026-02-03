@@ -290,46 +290,147 @@ def compute_battery_status(df):
         "samples_analyzed": len(df)
     }
 
-def compute_power_saturation(df, max_charge_power_watts, max_discharge_power_watts):
-    def power_stats(col, max_power):
-        mask = df[col] != 0
-        total = len(df[mask])
+def compute_power_usage(df, max_charge_power_watts, max_discharge_power_watts):
+    """
+    Power usage semantics:
+    - charging / discharging: ACTUAL behavior only
+    - idle: POTENTIAL capability
+    """
 
-        if total == 0:
-            return {
-                "at_max": {"sample_count": 0, "samples_percent": 0.0},
-                "not_at_max": {"sample_count": 0, "samples_percent": 0.0}
-            }
+    result = {
+        "charging": {},
+        "discharging": {},
+        "idle": {}
+    }
 
-        at_max = (df[col] == max_power).sum()
+    total_samples = len(df)
 
-        return {
+    for i, phase in enumerate(PHASE_KEYS):
+        charge_col = f"charge_power_phase_{phase}_W"
+        discharge_col = f"discharge_power_phase_{phase}_W"
+        status_col = f"battery_status_phase_{phase}"
+
+        max_charge = max_charge_power_watts[i]
+        max_discharge = max_discharge_power_watts[i]
+
+        # -----------------------------
+        # ACTUAL CHARGING
+        # -----------------------------
+        charging_mask = df[status_col] == "charging"
+        charging_total = charging_mask.sum()
+
+        charging_at_max = (
+            (df[charge_col] == max_charge) & charging_mask
+        ).sum()
+
+        result["charging"][phase] = {
             "at_max": {
-                "sample_count": int(at_max),
-                "samples_percent": round(at_max / total * 100, 2)
+                "sample_count": int(charging_at_max),
+                "samples_percent": round(
+                    charging_at_max / charging_total * 100, 2
+                ) if charging_total > 0 else 0.0
             },
             "not_at_max": {
-                "sample_count": int(total - at_max),
-                "samples_percent": round((total - at_max) / total * 100, 2)
+                "sample_count": int(charging_total - charging_at_max),
+                "samples_percent": round(
+                    (charging_total - charging_at_max) / charging_total * 100, 2
+                ) if charging_total > 0 else 0.0
             }
         }
 
-    return {
-        "charging": {
-            phase: power_stats(
-                f"charge_power_phase_{phase}_W",
-                max_charge_power_watts[i]
-            )
-            for i, phase in enumerate(PHASE_KEYS)
-        },
-        "discharging": {
-            phase: power_stats(
-                f"discharge_power_phase_{phase}_W",
-                max_discharge_power_watts[i]
-            )
-            for i, phase in enumerate(PHASE_KEYS)
+        # -----------------------------
+        # ACTUAL DISCHARGING
+        # -----------------------------
+        discharging_mask = df[status_col] == "discharging"
+        discharging_total = discharging_mask.sum()
+
+        discharging_at_max = (
+            (df[discharge_col] == max_discharge) & discharging_mask
+        ).sum()
+
+        result["discharging"][phase] = {
+            "at_max": {
+                "sample_count": int(discharging_at_max),
+                "samples_percent": round(
+                    discharging_at_max / discharging_total * 100, 2
+                ) if discharging_total > 0 else 0.0
+            },
+            "not_at_max": {
+                "sample_count": int(discharging_total - discharging_at_max),
+                "samples_percent": round(
+                    (discharging_total - discharging_at_max) / discharging_total * 100, 2
+                ) if discharging_total > 0 else 0.0
+            }
         }
-    }
+
+        # -----------------------------
+        # IDLE → POTENTIAL
+        # -----------------------------
+        idle_mask = ~df[status_col].isin(["charging", "discharging"])
+        idle_total = idle_mask.sum()
+
+        # Reconstruct instantaneous grid power (W)
+        grid_wh_col = f"simulated_house_consumption_phase_{phase.lower()}_Wh"
+        grid_power_w = df[grid_wh_col] * 60  # Wh per minute → W
+
+        # ----- CHARGING POTENTIAL -----
+        charge_potential_w = (-grid_power_w).clip(lower=0)
+
+        idle_charge_at_max = (
+            idle_mask &
+            (charge_potential_w >= max_charge)
+        )
+
+        idle_charge_not_at_max = (
+            idle_mask &
+            (charge_potential_w > 0) &
+            (charge_potential_w < max_charge)
+        )
+
+        # ----- DISCHARGING POTENTIAL -----
+        discharge_potential_w = grid_power_w.clip(lower=0)
+
+        idle_discharge_at_max = (
+            idle_mask &
+            (discharge_potential_w >= max_discharge)
+        )
+
+        idle_discharge_not_at_max = (
+            idle_mask &
+            (discharge_potential_w > 0) &
+            (discharge_potential_w < max_discharge)
+        )
+
+        result["idle"][phase] = {
+            "could_charge_at_max": {
+                "sample_count": int(idle_charge_at_max.sum()),
+                "samples_percent": round(
+                    idle_charge_at_max.sum() / idle_total * 100, 2
+                ) if idle_total > 0 else 0.0
+            },
+            "could_charge_not_at_max": {
+                "sample_count": int(idle_charge_not_at_max.sum()),
+                "samples_percent": round(
+                    idle_charge_not_at_max.sum() / idle_total * 100, 2
+                ) if idle_total > 0 else 0.0
+            },
+            "could_discharge_at_max": {
+                "sample_count": int(idle_discharge_at_max.sum()),
+                "samples_percent": round(
+                    idle_discharge_at_max.sum() / idle_total * 100, 2
+                ) if idle_total > 0 else 0.0
+            },
+            "could_discharge_not_at_max": {
+                "sample_count": int(idle_discharge_not_at_max.sum()),
+                "samples_percent": round(
+                    idle_discharge_not_at_max.sum() / idle_total * 100, 2
+                ) if idle_total > 0 else 0.0
+            }
+        }
+
+
+    result["samples_analyzed"] = total_samples
+    return result
 
 def build_canonical_results(
     df,
@@ -396,15 +497,7 @@ def build_canonical_results(
                 battery_max_cycles
             ),
             "status": compute_battery_status(df),
-            "power_saturation": (
-                compute_power_saturation(
-                    df,
-                    max_charge_power_watts,
-                    max_discharge_power_watts
-                )
-                if cycles is not None or duration_days >= 7
-                else None
-            ),
+            "power_usage": None,
             "headroom": compute_battery_headroom_from_df(df),
         }
     }
@@ -510,7 +603,7 @@ def print_progress_bar(current, total, prefix="Progress"):
     sys.stdout.flush()
 
 def compute_battery_utilization(cycles, duration_days, max_cycles):
-    if cycles is None or duration_days <= 0:
+    if cycles is None or duration_days <= 0 or battery_capacity_total_kwh <= 0:
         return None
 
     # cycles/year per phase
@@ -628,7 +721,7 @@ def compute_seasonal_profitability(ranges):
             "gain_chf": round_value(gain),
             "energy_flows": energy_flows,
             "battery_saturation": compute_battery_saturation_from_df(rng["_df"]),
-            "battery_headroom": rng["results"]["battery"]["headroom"],
+            "battery_headroom": rng["results"]["battery"].get("headroom"),
         })
 
         # ---- Daily undersize detection ----
@@ -670,6 +763,21 @@ def compute_seasonal_profitability(ranges):
 
     if not monthly:
         return None
+
+    # -------------------------------------------------
+    # ALIGN GLOBAL power_usage WITH MONTHLY AGGREGATION
+    # -------------------------------------------------
+    monthly_power_usages = [
+        r["results"]["battery"]["power_usage"]
+        for r in ranges
+        if r["range_type"] == "monthly"
+        and r["results"]["battery"]["power_usage"] is not None
+    ]
+
+    global_power_usage = aggregate_power_usage(monthly_power_usages)
+
+    # Global range is the first one by construction
+    ranges[0]["results"]["battery"]["power_usage"] = global_power_usage
 
     # --- best / worst ---
     best = max(monthly, key=lambda x: x["gain_chf"])
@@ -937,6 +1045,9 @@ def compute_battery_sizing_score(df_day, battery_capacity_total_kwh):
     Sweet-spot oriented sizing score (0..100)
     """
 
+    if battery_capacity_total_kwh <= 0:
+        return None   # no battery → no sizing score
+
     # ---------- NIGHT SUCCESS ----------
     night_ok = compute_night_success_ratio(df_day, battery_capacity_total_kwh)
 
@@ -974,9 +1085,26 @@ def compute_battery_saturation_from_df(df):
     Aggregated across all phases.
     """
     total_samples = len(df) * len(PHASE_KEYS)
+    if total_samples == 0 or battery_capacity_total_kwh <= 0:
+        grid_cols = [
+            "simulated_house_consumption_phase_a_Wh",
+            "simulated_house_consumption_phase_b_Wh",
+            "simulated_house_consumption_phase_c_Wh",
+        ]
 
-    if total_samples == 0:
-        return None
+        grid_vals = df[grid_cols]
+
+        grid_injected_kwh = (
+            -grid_vals[grid_vals < 0].sum().sum() / 1000
+        )
+
+        return {
+            "battery_full_share_percent": 100.0,
+            "battery_empty_share_percent": 0.0,
+            "charged_energy_kwh": 0.0,
+            "charge_power_saturation_percent": None,
+            "grid_injected_kwh": round_value(grid_injected_kwh, 2)
+        }
 
     full = 0
     empty = 0
@@ -1049,6 +1177,9 @@ def compute_sunset_soc_ratio(df_day, battery_capacity_total_kwh):
         .sum(axis=1)
     )
 
+    if battery_capacity_total_kwh <= 0:
+        return None
+
     soc_ratio = soc_wh / (battery_capacity_total_kwh * 1000)
     return soc_ratio.mean()
 
@@ -1068,6 +1199,9 @@ def compute_night_success_ratio(df_day, battery_capacity_total_kwh):
         night[[f"battery_energy_phase_{p}_Wh" for p in PHASE_KEYS]]
         .sum(axis=1)
     )
+
+    if battery_capacity_total_kwh <= 0:
+        return None   # no battery → not applicable
 
     min_soc_ratio = soc_wh.min() / (battery_capacity_total_kwh * 1000)
 
@@ -1160,6 +1294,45 @@ def compute_battery_headroom_from_df(df):
         "charge_headroom_kwh": round_value(charge_Wh / 1000, 2),
         "discharge_headroom_kwh": round_value(discharge_Wh / 1000, 2),
     }
+
+def aggregate_power_usage(monthly_usages):
+    if not monthly_usages:
+        return None
+
+    out = {"charging": {}, "discharging": {}, "idle": {}}
+
+    for section in ["charging", "discharging", "idle"]:
+        for phase in PHASE_KEYS:
+            out[section][phase] = {}
+
+    total_samples = 0
+
+    for u in monthly_usages:
+        total_samples += u.get("samples_analyzed", 0)
+
+        for section in ["charging", "discharging", "idle"]:
+            for phase, metrics in u[section].items():
+                for k, v in metrics.items():
+                    out[section][phase].setdefault(
+                        k, {"sample_count": 0, "samples_percent": 0.0}
+                    )
+                    out[section][phase][k]["sample_count"] += v["sample_count"]
+
+    # recompute percentages
+    for section in out:
+        for phase in out[section]:
+            phase_total = sum(
+                m["sample_count"] for m in out[section][phase].values()
+            )
+            for k in out[section][phase]:
+                cnt = out[section][phase][k]["sample_count"]
+                out[section][phase][k]["samples_percent"] = (
+                    round(cnt / phase_total * 100, 2)
+                    if phase_total > 0 else 0.0
+                )
+
+    out["samples_analyzed"] = total_samples
+    return out
 
 ###################################################################
 # MAIN
@@ -1745,17 +1918,25 @@ for (year, month), df_month in monthly_groups:
         range_meta["samples_analyzed"]
     )
 
+    results = build_canonical_results(
+        df_month,
+        battery_cost,
+        duration_days_month,
+        cycles=None
+    )
+
+    results["battery"]["power_usage"] = compute_power_usage(
+        df_month,
+        max_charge_power_watts,
+        max_discharge_power_watts
+    )
+
     ranges.append({
         "range_index": range_index,
         "range_id": f"{year}-{month:02d}",
         "range_type": "monthly",
         "range": range_meta,
-        "results": build_canonical_results(
-            df_month,
-            battery_cost,
-            duration_days_month,
-            cycles=None
-        ),
+        "results": results,
         "_df": df_month 
     })
 
