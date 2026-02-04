@@ -1,6 +1,6 @@
 {
   "battery": {
-    "capacity_Wh_per_phase": [3270, 3270, 3270],
+    "capacity_Wh_per_phase": [2880, 2880, 2880],
     "cost_chf": 3042,
     "max_charge_power_watts": [2400, 2400, 2400],
     "max_discharge_power_watts": [2400, 2400, 2400],
