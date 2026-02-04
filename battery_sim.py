@@ -722,6 +722,7 @@ def compute_seasonal_profitability(ranges):
             "energy_flows": energy_flows,
             "battery_saturation": compute_battery_saturation_from_df(rng["_df"]),
             "battery_headroom": rng["results"]["battery"].get("headroom"),
+            "_power_usage": rng["results"]["battery"].get("power_usage"),
         })
 
         # ---- Daily undersize detection ----
@@ -821,6 +822,15 @@ def compute_seasonal_profitability(ranges):
             "battery_headroom": {
                 "charge_kwh": 0.0,
                 "discharge_kwh": 0.0
+            },
+            "power_usage": {
+                "charging": {p: {"at_max": 0, "not_at_max": 0} for p in PHASE_KEYS},
+                "discharging": {p: {"at_max": 0, "not_at_max": 0} for p in PHASE_KEYS},
+                # if you want idle too, keep it here (see note below)
+                "idle": {p: {"could_charge_at_max": 0, "could_charge_not_at_max": 0,
+                            "could_discharge_at_max": 0, "could_discharge_not_at_max": 0}
+                        for p in PHASE_KEYS},
+                "samples_analyzed": 0
             }
         })
 
@@ -858,6 +868,29 @@ def compute_seasonal_profitability(ranges):
             seasons[s]["daily_evening_undersize"]["undersized_days"] += deu["undersized_days"]
             seasons[s]["daily_evening_undersize"]["total_days"] += deu["total_days"]
 
+        # Power usage (if you already compute it in monthly ranges, otherwise it will be None and skipped)
+        pu = m.get("_power_usage")
+        if pu:
+            seasons[s]["power_usage"]["samples_analyzed"] += pu.get("samples_analyzed", 0)
+
+            for phase in PHASE_KEYS:
+                # charging
+                seasons[s]["power_usage"]["charging"][phase]["at_max"] += pu["charging"][phase]["at_max"]["sample_count"]
+                seasons[s]["power_usage"]["charging"][phase]["not_at_max"] += pu["charging"][phase]["not_at_max"]["sample_count"]
+
+                # discharging
+                seasons[s]["power_usage"]["discharging"][phase]["at_max"] += pu["discharging"][phase]["at_max"]["sample_count"]
+                seasons[s]["power_usage"]["discharging"][phase]["not_at_max"] += pu["discharging"][phase]["not_at_max"]["sample_count"]
+
+                # idle (only if you already output these keys in JSON)
+                idle = pu.get("idle", {}).get(phase)
+                if idle:
+                    seasons[s]["power_usage"]["idle"][phase]["could_charge_at_max"] += idle.get("could_charge_at_max", {}).get("sample_count", 0)
+                    seasons[s]["power_usage"]["idle"][phase]["could_charge_not_at_max"] += idle.get("could_charge_not_at_max", {}).get("sample_count", 0)
+                    seasons[s]["power_usage"]["idle"][phase]["could_discharge_at_max"] += idle.get("could_discharge_at_max", {}).get("sample_count", 0)
+                    seasons[s]["power_usage"]["idle"][phase]["could_discharge_not_at_max"] += idle.get("could_discharge_not_at_max", {}).get("sample_count", 0)
+
+
     seasonal_summary = {}
 
     for s, data in seasons.items():
@@ -872,8 +905,55 @@ def compute_seasonal_profitability(ranges):
         undersize_days = data["daily_energy_undersize"]["undersized_days"]
         total_days = data["daily_energy_undersize"]["total_days"]
 
-        charge = data["battery_headroom"]["charge_kwh"]
-        discharge = data["battery_headroom"]["discharge_kwh"]
+        pu_acc = data.get("power_usage")
+        season_power_usage = None
+
+        samples_analyzed = int(pu["samples_analyzed"] * len(PHASE_KEYS))
+
+        if pu_acc and pu_acc["samples_analyzed"] > 0:
+
+            pu = data["power_usage"]
+
+            # ---- aggregate across phases ----
+            charging_at_max = sum(pu["charging"][p]["at_max"] for p in PHASE_KEYS)
+            charging_not = sum(pu["charging"][p]["not_at_max"] for p in PHASE_KEYS)
+
+            discharging_at_max = sum(pu["discharging"][p]["at_max"] for p in PHASE_KEYS)
+            discharging_not = sum(pu["discharging"][p]["not_at_max"] for p in PHASE_KEYS)
+
+            idle_charge_at_max = sum(pu["idle"][p]["could_charge_at_max"] for p in PHASE_KEYS)
+            idle_charge_not = sum(pu["idle"][p]["could_charge_not_at_max"] for p in PHASE_KEYS)
+
+            idle_discharge_at_max = sum(pu["idle"][p]["could_discharge_at_max"] for p in PHASE_KEYS)
+            idle_discharge_not = sum(pu["idle"][p]["could_discharge_not_at_max"] for p in PHASE_KEYS)
+
+            season_power_usage = {
+                "charging": _mk_atmax_block(
+                    charging_at_max,
+                    charging_not,
+                    samples_analyzed
+                ),
+                "discharging": _mk_atmax_block(
+                    discharging_at_max,
+                    discharging_not,
+                    samples_analyzed
+                ),
+                "idle": {
+                    "could_charge": _mk_atmax_block(
+                        idle_charge_at_max,
+                        idle_charge_not,
+                        samples_analyzed
+                    ),
+                    "could_discharge": _mk_atmax_block(
+                        idle_discharge_at_max,
+                        idle_discharge_not,
+                        samples_analyzed
+                    )
+                },
+                "samples_analyzed": int(
+                    pu["samples_analyzed"] * len(PHASE_KEYS)
+                )
+            }
 
         seasonal_summary[s] = {
             "months_count": len(gains),
@@ -914,15 +994,14 @@ def compute_seasonal_profitability(ranges):
                     - data["battery_headroom"]["charge_kwh"],
                     2
                 )
-            }
+            },
+            "power_usage": season_power_usage
         }
-        charge = data["battery_headroom"]["charge_kwh"]
-        discharge = data["battery_headroom"]["discharge_kwh"]
 
-        seasonal_summary[s]["battery_headroom"] = {
-            "charge_headroom_kwh": round_value(charge, 2),
-            "discharge_headroom_kwh": round_value(discharge, 2)
-        }
+    for s, data in seasonal_summary.items():
+        pu = data.get("power_usage")
+        if pu:
+            assert pu["samples_analyzed"] > 0, f"{s}: empty power_usage"
 
     return {
         "monthly_evolution": monthly,
@@ -1333,6 +1412,22 @@ def aggregate_power_usage(monthly_usages):
 
     out["samples_analyzed"] = total_samples
     return out
+
+def _mk_atmax_block(at_max_count, not_at_max_count, samples_analyzed):
+    return {
+        "at_max": {
+            "sample_count": int(at_max_count),
+            "samples_percent": round_value(
+                at_max_count / samples_analyzed * 100, 2
+            ) if samples_analyzed > 0 else 0.0
+        },
+        "not_at_max": {
+            "sample_count": int(not_at_max_count),
+            "samples_percent": round_value(
+                not_at_max_count / samples_analyzed * 100, 2
+            ) if samples_analyzed > 0 else 0.0
+        }
+    }
 
 ###################################################################
 # MAIN
