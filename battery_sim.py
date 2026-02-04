@@ -927,6 +927,22 @@ def compute_seasonal_profitability(ranges):
             idle_discharge_at_max = sum(pu["idle"][p]["could_discharge_at_max"] for p in PHASE_KEYS)
             idle_discharge_not = sum(pu["idle"][p]["could_discharge_not_at_max"] for p in PHASE_KEYS)
 
+            charging_total = charging_at_max + charging_not
+            discharging_total = discharging_at_max + discharging_not
+            idle_could_charge_total = idle_charge_at_max + idle_charge_not
+            idle_could_discharge_total = idle_discharge_at_max + idle_discharge_not
+
+            idle_no_opportunity = (
+                samples_analyzed
+                - charging_total
+                - discharging_total
+                - idle_could_charge_total
+                - idle_could_discharge_total
+            )
+
+            # Safety clamp (numerical drift)
+            idle_no_opportunity = max(0, idle_no_opportunity)
+
             season_power_usage = {
                 "charging": _mk_atmax_block(
                     charging_at_max,
@@ -948,7 +964,14 @@ def compute_seasonal_profitability(ranges):
                         idle_discharge_at_max,
                         idle_discharge_not,
                         samples_analyzed
-                    )
+                    ),
+                    "no_opportunity": {
+                        "sample_count": int(idle_no_opportunity),
+                        "samples_percent": round_value(
+                            idle_no_opportunity / samples_analyzed * 100,
+                            2
+                        ) if samples_analyzed > 0 else 0.0
+                    }
                 },
                 "samples_analyzed": int(
                     pu["samples_analyzed"] * len(PHASE_KEYS)
