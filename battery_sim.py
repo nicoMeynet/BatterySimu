@@ -224,21 +224,29 @@ def build_json_report(simulation_ranges, seasonal_profitability=None):
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
 
+    global_range = next(
+        r for r in simulation_ranges
+        if r["range_type"] == "global"
+    )
+
+    monthly_ranges = [
+        r for r in simulation_ranges
+        if r["range_type"] == "monthly"
+    ]
+
     return {
-        "schema_version": "1.4",
+        "schema_version": "1.5",
         "simulation_id": datetime.now(UTC).isoformat(),
-        "phase_convention": {
-            "type": "electrical",
-            "values": PHASE_KEYS
-        },
 
         "configuration": configuration,
         "configuration_hash": configuration_hash,
 
-        "simulation": {
-            "ranges": strip_internal_fields_for_json(simulation_ranges),
-            "seasonal_profitability": seasonal_profitability
-        }
+        "global": global_range["results"],
+
+        "months": strip_internal_fields_for_json(monthly_ranges),
+
+        "seasons": seasonal_profitability["seasonal_breakdown"]
+        if seasonal_profitability else None
     }
 
 #---- JSON Report Exporter ----
