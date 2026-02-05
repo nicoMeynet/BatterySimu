@@ -142,7 +142,11 @@ def simulate_battery_behavior(house_grid_power_watts):
         soc_max_Wh = battery_capacity_Wh[phase] * battery_soc_max_pct / 100
         soc_min_Wh = battery_energy_min_Wh[phase]
 
-        if energy_in_battery_Wh[phase] >= soc_max_Wh * 0.99:
+        # 🔴 NO BATTERY SPECIAL CASE
+        if battery_capacity_Wh[phase] == 0:
+            battery_status[phase] = "empty"
+
+        elif energy_in_battery_Wh[phase] >= soc_max_Wh * 0.99:
             battery_status[phase] = "full"
 
         elif energy_in_battery_Wh[phase] <= soc_min_Wh:
@@ -1209,8 +1213,8 @@ def compute_battery_saturation_from_df(df):
         )
 
         return {
-            "battery_full_share_percent": 100.0,
-            "battery_empty_share_percent": 0.0,
+            "battery_full_share_percent": 0.0,
+            "battery_empty_share_percent": 100.0,
             "charged_energy_kwh": 0.0,
             "charge_power_saturation_percent": None,
             "grid_injected_kwh": round_value(grid_injected_kwh, 2)
@@ -1325,6 +1329,10 @@ def compute_daily_energy_undersize(df_day):
     - AND battery became EMPTY before next charging opportunity
     """
 
+    # 🔴 NO BATTERY → ALWAYS UNDERSIZED
+    if battery_capacity_total_kwh <= 0:
+        return True
+
     # --- 1) Battery full during day (PV window approximation) ---
     day_window = df_day[
         (df_day["timestamp"].dt.hour >= 10) &
@@ -1359,6 +1367,10 @@ def compute_daily_evening_undersize(df_day):
     - battery was FULL in late afternoon
     - AND battery became EMPTY in the evening (before midnight)
     """
+
+    # 🔴 NO BATTERY → ALWAYS UNDERSIZED
+    if battery_capacity_total_kwh <= 0:
+        return True
 
     # Late afternoon: battery was full thanks to PV
     late_day = df_day[
