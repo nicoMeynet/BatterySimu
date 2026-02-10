@@ -1,7 +1,7 @@
 {
   "battery": {
-    "capacity_Wh_per_phase": [8640, 8640, 8640],
-    "cost_chf": 6471,
+    "capacity_Wh_per_phase": [14400, 14400, 14400],
+    "cost_chf": 9993,
     "max_charge_power_watts": [2400, 2400, 2400],
     "max_discharge_power_watts": [2400, 2400, 2400],
     "charge_efficiency": 0.9,

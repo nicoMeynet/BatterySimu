@@ -441,7 +441,7 @@ def compute_power_usage(df, max_charge_power_watts, max_discharge_power_watts):
         }
 
 
-    result["samples_analyzed"] = total_samples
+    result["samples_analyzed"] = total_samples * len(PHASE_KEYS)
     return result
 
 def build_canonical_results(
@@ -920,7 +920,7 @@ def compute_seasonal_profitability(ranges):
         pu_acc = data.get("power_usage")
         season_power_usage = None
 
-        samples_analyzed = int(pu["samples_analyzed"] * len(PHASE_KEYS))
+        samples_analyzed = pu["samples_analyzed"] * len(PHASE_KEYS)
 
         if pu_acc and pu_acc["samples_analyzed"] > 0:
 
