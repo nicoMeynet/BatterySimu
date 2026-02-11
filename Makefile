@@ -6,6 +6,19 @@ VENV_DIR := venv
 REQ_FILE := requirements.txt
 ULIMIT_VALUE ?= 2048
 
+DATASETS := \
+	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
+	dataset/2025/2025_history_phase_b_1dec2024-1dec2025.csv \
+	dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv
+
+CONFIGS := \
+	config_Zendure2400_11520kwh.json \
+	config_Zendure2400_14400kwh.json \
+	config_Zendure2400_2880kwh.json \
+	config_Zendure2400_5760kwh.json \
+	config_Zendure2400_8640kwh.json \
+	config_Zendure2400_noBattery.json
+
 .PHONY: all
 all: venv activate
 
@@ -31,3 +44,13 @@ endif
 activate:
 	@echo "Run the following command to activate the virtual environment:"
 	@echo "source $(VENV_DIR)/bin/activate"
+
+
+.PHONY: simulate_all
+simulate_all:
+	@echo "Running battery simulation for all configurations..."
+	@for cfg in $(CONFIGS); do \
+		echo "----------------------------------------"; \
+		echo "Running with $$cfg"; \
+		$(VENV_DIR)/bin/python battery_sim.py $(DATASETS) --config $$cfg; \
+	done
