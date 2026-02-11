@@ -12,12 +12,12 @@ DATASETS := \
 	dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv
 
 CONFIGS := \
-	config_Zendure2400_11520kwh.json \
-	config_Zendure2400_14400kwh.json \
-	config_Zendure2400_2880kwh.json \
-	config_Zendure2400_5760kwh.json \
-	config_Zendure2400_8640kwh.json \
-	config_Zendure2400_noBattery.json
+	config/config_Zendure2400_11520kwh.json \
+	config/config_Zendure2400_14400kwh.json \
+	config/config_Zendure2400_2880kwh.json \
+	config/config_Zendure2400_5760kwh.json \
+	config/config_Zendure2400_8640kwh.json \
+	config/config_Zendure2400_noBattery.json
 
 .PHONY: all
 all: venv activate
