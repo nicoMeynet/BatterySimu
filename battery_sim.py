@@ -2069,6 +2069,43 @@ for (year, month), df_month in monthly_groups:
         max_discharge_power_watts
     )
 
+    # ---- Monthly energy undersize detection ----
+    daily_energy_flags = []
+    daily_evening_flags = []
+
+    df_tmp = df_month.copy()
+    df_tmp["date"] = df_tmp["timestamp"].dt.date
+
+    for _, df_day in df_tmp.groupby("date"):
+        daily_energy_flags.append(
+            compute_daily_energy_undersize(df_day)
+        )
+        daily_evening_flags.append(
+            compute_daily_evening_undersize(df_day)
+        )
+
+    energy_undersized_days = sum(1 for x in daily_energy_flags if x)
+    evening_undersized_days = sum(1 for x in daily_evening_flags if x)
+    total_days = len(daily_energy_flags)
+
+    results["battery"]["energy_undersize_days"] = {
+        "undersized_days": energy_undersized_days,
+        "total_days": total_days,
+        "percent": round_value(
+            energy_undersized_days / total_days * 100 if total_days > 0 else 0,
+            1
+        )
+    }
+
+    results["battery"]["evening_undersize_days"] = {
+        "undersized_days": evening_undersized_days,
+        "total_days": total_days,
+        "percent": round_value(
+            evening_undersized_days / total_days * 100 if total_days > 0 else 0,
+            1
+        )
+    }
+
     ranges.append({
         "range_index": range_index,
         "range_id": f"{year}-{month:02d}",
