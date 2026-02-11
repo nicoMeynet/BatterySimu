@@ -11,6 +11,10 @@ PDF_REPORT_OUTPUT ?= out/battery_graph_report.pdf
 PDF_REPORT_TITLE ?= Battery Simulation Graph Report
 PDF_REPORT_SUBTITLE ?= Monthly and seasonal comparison charts
 PDF_REPORT_INTRO ?= This report compares battery scenarios to identify an optimal storage size for your home. It explains the simulation process from 3-phase input data to tariff-aware charge/discharge modeling, and interprets monthly versus seasonal graphs to support sizing decisions. The goal is to balance financial return, energy adequacy, and power limits in order to select the smallest battery configuration that still delivers strong performance.
+MONTH_NOTEBOOK ?= battery_comparison_month.ipynb
+SEASON_NOTEBOOK ?= battery_comparison_season.ipynb
+NOTEBOOK_TIMEOUT ?= -1
+NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -60,6 +64,28 @@ simulate_all:
 		echo "Running with $$cfg"; \
 		$(VENV_DIR)/bin/python battery_sim.py $(DATASETS) --config $$cfg; \
 	done
+
+.PHONY: run_notebooks
+run_notebooks:
+	@echo "Executing notebooks to refresh graphs/images..."
+	@$(VENV_DIR)/bin/python -m jupyter --version >/dev/null 2>&1 || { \
+		echo "Jupyter is not installed in $(VENV_DIR)."; \
+		echo "Install it with: $(VENV_DIR)/bin/python -m pip install jupyter nbconvert"; \
+		exit 1; \
+	}
+	@mkdir -p "$(NOTEBOOK_MPLCONFIGDIR)"
+	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m jupyter nbconvert \
+		--to notebook \
+		--execute \
+		--inplace \
+		--ExecutePreprocessor.timeout=$(NOTEBOOK_TIMEOUT) \
+		"$(MONTH_NOTEBOOK)"
+	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m jupyter nbconvert \
+		--to notebook \
+		--execute \
+		--inplace \
+		--ExecutePreprocessor.timeout=$(NOTEBOOK_TIMEOUT) \
+		"$(SEASON_NOTEBOOK)"
 
 .PHONY: pdf_report
 pdf_report:

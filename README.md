@@ -25,6 +25,9 @@ The project compares:
   - `pandas`
   - `tabulate`
   - `matplotlib`
+- Optional for notebook automation:
+  - `jupyter`
+  - `nbconvert`
 
 ## Setup
 
@@ -103,6 +106,18 @@ Both notebooks are preconfigured to read:
 - `out/config_Zendure2400_11520kwh.json`
 - `out/config_Zendure2400_14400kwh.json`
 
+The notebooks are configured to auto-export figures when executed:
+- monthly notebook exports to `out/month`
+- seasonal notebook exports to `out/season`
+
+### Execute notebooks from Makefile
+
+To regenerate all notebook graphs/images automatically:
+
+```bash
+make run_notebooks
+```
+
 ## Build a PDF from notebook graphs
 
 Export your notebook charts as image files (for example PNG), then run:
@@ -110,8 +125,8 @@ Export your notebook charts as image files (for example PNG), then run:
 ```bash
 python generate_pdf_report.py \
   --configs config/*.json \
-  --monthly out/graphs/monthly/*.png \
-  --seasonal out/graphs/seasonal/*.png \
+  --monthly out/month/*.png \
+  --seasonal out/season/*.png \
   --output out/battery_graph_report.pdf \
   --title "Battery Simulation Graph Report" \
   --subtitle "Monthly and seasonal comparison charts"
@@ -122,6 +137,34 @@ Notes:
 - `--configs` adds a configuration section (nice table) at the beginning of the PDF.
 - Output is a multi-page PDF with cover page, monthly section, and seasonal section.
 - Captions are inferred from each image file name.
+
+### Recommended end-to-end flow
+
+1. Run simulations:
+```bash
+make simulate_all
+```
+
+2. Refresh notebook charts (auto `savefig`):
+```bash
+make run_notebooks
+```
+
+3. Build PDF using notebook export folders:
+```bash
+make pdf_report \
+  MONTHLY_GRAPHS_DIR=out/month \
+  SEASONAL_GRAPHS_DIR=out/season \
+  PDF_REPORT_OUTPUT=out/my_report.pdf
+```
+
+You can also chain steps 2 and 3:
+```bash
+make run_notebooks pdf_report \
+  MONTHLY_GRAPHS_DIR=out/month \
+  SEASONAL_GRAPHS_DIR=out/season \
+  PDF_REPORT_OUTPUT=out/my_report.pdf
+```
 
 ## Configuration format
 
