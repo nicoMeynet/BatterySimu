@@ -103,6 +103,24 @@ Both notebooks are preconfigured to read:
 - `out/config_Zendure2400_11520kwh.json`
 - `out/config_Zendure2400_14400kwh.json`
 
+## Build a PDF from notebook graphs
+
+Export your notebook charts as image files (for example PNG), then run:
+
+```bash
+python generate_pdf_report.py \
+  --monthly out/graphs/monthly/*.png \
+  --seasonal out/graphs/seasonal/*.png \
+  --output out/battery_graph_report.pdf \
+  --title "Battery Simulation Graph Report" \
+  --subtitle "Monthly and seasonal comparison charts"
+```
+
+Notes:
+- `--monthly` and `--seasonal` accept one or more image paths.
+- Output is a multi-page PDF with cover page, monthly section, and seasonal section.
+- Captions are inferred from each image file name.
+
 ## Configuration format
 
 Each JSON config contains:
