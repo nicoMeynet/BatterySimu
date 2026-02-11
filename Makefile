@@ -68,19 +68,19 @@ simulate_all:
 .PHONY: run_notebooks
 run_notebooks:
 	@echo "Executing notebooks to refresh graphs/images..."
-	@$(VENV_DIR)/bin/python -m jupyter --version >/dev/null 2>&1 || { \
-		echo "Jupyter is not installed in $(VENV_DIR)."; \
-		echo "Install it with: $(VENV_DIR)/bin/python -m pip install jupyter nbconvert"; \
+	@$(VENV_DIR)/bin/python -c "import nbconvert" >/dev/null 2>&1 || { \
+		echo "nbconvert is not installed in $(VENV_DIR)."; \
+		echo "Install it with: $(VENV_DIR)/bin/python -m pip install nbconvert"; \
 		exit 1; \
 	}
 	@mkdir -p "$(NOTEBOOK_MPLCONFIGDIR)"
-	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m jupyter nbconvert \
+	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m nbconvert \
 		--to notebook \
 		--execute \
 		--inplace \
 		--ExecutePreprocessor.timeout=$(NOTEBOOK_TIMEOUT) \
 		"$(MONTH_NOTEBOOK)"
-	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m jupyter nbconvert \
+	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m nbconvert \
 		--to notebook \
 		--execute \
 		--inplace \
