@@ -109,6 +109,7 @@ Export your notebook charts as image files (for example PNG), then run:
 
 ```bash
 python generate_pdf_report.py \
+  --configs config/*.json \
   --monthly out/graphs/monthly/*.png \
   --seasonal out/graphs/seasonal/*.png \
   --output out/battery_graph_report.pdf \
@@ -118,6 +119,7 @@ python generate_pdf_report.py \
 
 Notes:
 - `--monthly` and `--seasonal` accept one or more image paths.
+- `--configs` adds a configuration section (nice table) at the beginning of the PDF.
 - Output is a multi-page PDF with cover page, monthly section, and seasonal section.
 - Captions are inferred from each image file name.
 

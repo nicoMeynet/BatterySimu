@@ -10,6 +10,7 @@ SEASONAL_GRAPHS_DIR ?= out/graphs/seasonal
 PDF_REPORT_OUTPUT ?= out/battery_graph_report.pdf
 PDF_REPORT_TITLE ?= Battery Simulation Graph Report
 PDF_REPORT_SUBTITLE ?= Monthly and seasonal comparison charts
+PDF_REPORT_INTRO ?= This report compares battery scenarios to identify an optimal storage size for your home. It explains the simulation process from 3-phase input data to tariff-aware charge/discharge modeling, and interprets monthly versus seasonal graphs to support sizing decisions. The goal is to balance financial return, energy adequacy, and power limits in order to select the smallest battery configuration that still delivers strong performance.
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -84,8 +85,10 @@ pdf_report:
 		exit 1; \
 	fi; \
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
+		--configs $(CONFIGS) \
 		--monthly $$monthly_files \
 		--seasonal $$seasonal_files \
 		--output "$(PDF_REPORT_OUTPUT)" \
 		--title "$(PDF_REPORT_TITLE)" \
-		--subtitle "$(PDF_REPORT_SUBTITLE)"
+		--subtitle "$(PDF_REPORT_SUBTITLE)" \
+		--intro "$(PDF_REPORT_INTRO)"
