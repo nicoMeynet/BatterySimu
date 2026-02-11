@@ -1,209 +1,132 @@
 # Battery Simulator
 
-## Overview
-The Battery Simulator is a Python-based tool designed to optimize residential energy consumption using a 3-phase battery system. By modeling battery behavior and calculating energy flows, the simulator provides insights into energy usage, cost savings, and the financial viability of battery systems in real-world scenarios. This tool empowers homeowners to make data-driven decisions about integrating battery systems into their energy setups, including determining the optimal sizing of the system, the number of batteries per phase, and the charging and discharging power required per phase.
+Battery simulation for a 3-phase house using Home Assistant power history data.
 
-Key benefits include:
-- **Technical:** Simulates energy flows and battery performance with precision.
-- **Financial:** Provides detailed analysis of cost savings and rentability.
-- **Operational:** Easily integrates with Home Assistant CSV data for seamless modeling.
+The project compares:
+- baseline (no battery)
+- simulated battery behavior
+- financial impact (CHF)
+- monthly and seasonal performance
 
-### Why Plug-and-Play Batteries?
-Early this year, plug-and-play battery systems have surged in popularity due to their ease of installation—no electrician required. Technological advancements and decreasing costs have made these systems more accessible for residential use. However, understanding their economic feasibility remains challenging.
+## What is in this repo
 
-#### Examples of plug-and-play batteries:
-- Zendure Hyper 2000
-- Sunology Storey
-
-The Battery Simulator aims to simplify this evaluation process by analyzing the potential savings, operational impact, and optimal configuration of these systems.
-
-## Features
-### Technical Features
-- Models a 3-phase battery system with configurable capacity and power.
-- Handles time-based tariffs for energy consumption and injection.
-- Provides detailed statistics on energy usage and battery behavior.
-- Includes preprocessing of input data with timestamp interpolation.
-
-### Financial Features
-- Calculates battery efficiency and lifecycle.
-- Estimates cost savings and rentability of battery systems.
-- Accounts for peak and off-peak energy tariffs to optimize savings.
-
-### Operational Features
-- Supports CSV-based input from Home Assistant for seamless integration.
-- Offers configurability for battery parameters and tariff structures.
-- Simulates charging and discharging cycles for real-world scenarios.
+- `battery_sim.py`: main simulation engine
+- `config/*.json`: battery and tariff scenarios
+- `dataset/`: input CSV files (phase A/B/C power history)
+- `out/`: generated outputs (`.csv` and `.json`)
+- `battery_comparison_month.ipynb`: monthly comparison notebook
+- `battery_comparison_season.ipynb`: seasonal comparison notebook
+- `Makefile`: setup and batch run shortcuts
 
 ## Requirements
-- Python 3.7+
-- Required Python libraries:
+
+- Python 3
+- Packages in `requirements.txt`:
   - `pandas`
   - `tabulate`
+  - `matplotlib`
 
-Install the required libraries using:
+## Setup
+
 ```bash
-pip install pandas tabulate
+make venv
+source venv/bin/activate
 ```
 
-## Usage
-Run the script with the following command:
+The Makefile also appends `ulimit -n 2048` (configurable) to `venv/bin/activate`.
+
+## Run simulations
+
+### Run one configuration
+
 ```bash
-python battery_simulator.py <house_phase_a.csv> <house_phase_b.csv> <house_phase_c.csv>  [--export-csv]
+python battery_sim.py \
+  dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
+  dataset/2025/2025_history_phase_b_1dec2024-1dec2025.csv \
+  dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv \
+  --config config/config_Zendure2400_5760kwh.json
 ```
 
-### Arguments
-- `<house_phase_a.csv>`: CSV file containing energy consumption data for Phase A.
-- `<house_phase_b.csv>`: CSV file containing energy consumption data for Phase B.
-- `<house_phase_c.csv>`: CSV file containing energy consumption data for Phase C.
-- `--export-csv`: optional parameter to enable a csv export of the data
+### Run all configured scenarios
 
-### Example
 ```bash
-python battery_simulator.py phase_a.csv phase_b.csv phase_c.csv
-
+make simulate_all
 ```
 
-## Input File Format
-The CSV file containing the measurements is sourced from Home Assistant, which collects energy consumption data for each phase using a Shelly 3EM module.
-Each input CSV file should have the following structure:
+Current scenarios run by `make simulate_all`:
+- `config/config_Zendure2400_noBattery.json`
+- `config/config_Zendure2400_2880kwh.json`
+- `config/config_Zendure2400_5760kwh.json`
+- `config/config_Zendure2400_8640kwh.json`
+- `config/config_Zendure2400_11520kwh.json`
+- `config/config_Zendure2400_14400kwh.json`
 
-### Phase CSV (A, B, C)
-| entity_id                                    | state       | last_changed           |
-|---------------------------------------------|-------------|------------------------|
-| sensor.shellyem3_244cab435bf4_channel_a_power | 128.517028  | 2024-12-31T23:00:00Z |
-| sensor.shellyem3_244cab435bf4_channel_a_power | 128.570356  | 2025-01-01T00:00:00Z |
+## Inputs
 
-### Preprocessing
-The script performs the following preprocessing steps:
-- Clean dataset.
-- Groups data by timestamp.
-- Fills missing timestamps with interpolated values.
+`battery_sim.py` expects 3 CSV files (phase A, B, C) with this schema:
+- `entity_id`
+- `state` (W)
+- `last_changed` (timestamp)
+
+Typical source: Home Assistant export from Shelly 3EM power sensors.
+
+The script:
+- rounds timestamps to minute resolution
+- groups duplicate timestamps by mean power
+- fills missing timestamps by linear interpolation
 
 ## Outputs
-1. **Simulation Results**: Detailed energy statistics printed to the console, including:
-   - Energy injected and consumed during peak (HP) and off-peak (HC) hours.
-   - Delta values for energy usage and associated cost differences.
-   - Rentability of the battery
-   - Battery lifecycle, charging/discharging statistics.
 
-### Example Output with a dataset of 337 days
-#### Injected Energy
-The table below shows the energy injected into the grid.
-Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid.
+For each run, outputs are written to `out/` using the config file name:
+- `out/<config-name>.csv`: minute-level simulation table
+- `out/<config-name>.json`: structured report (global + monthly + seasonal metrics)
 
-| Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
-|---------------------------|---------------|-----------------|-------------|-------------|
-| Phase A Injected Off-Peak | 1782          | 843             | -939        | -93          |
-| Phase A Injected Peak     | 0             | 0               | 0           | 0           |
-| Phase B Injected Off-Peak | 2169          | 1315            | -854        | -85          |
-| Phase B Injected Peak     | 0             | 0               | 0           | 0           |
-| Phase C Injected Off-Peak | 2374          | 1622            | -752        | -75          |
-| Phase C Injected Peak     | 3             | 3               | 0           | 0           |
-| **Total Injected**        | **6328**      | **3783**        | **-2545**   | **-253**     |
+Example:
+- `--config config/config_Zendure2400_5760kwh.json`
+- output files:
+  - `out/config_Zendure2400_5760kwh.csv`
+  - `out/config_Zendure2400_5760kwh.json`
 
-#### Consumed Energy
-The table below shows the energy consumed from the grid.
-Adding a battery is expected to reduce the amount of energy consumed from the grid.
+Console output also includes injected/consumed deltas, gain/amortization, battery status, and charge/discharge usage summaries.
 
-| Phase                     | Current (kWh) | Simulated (kWh) | Delta (kWh) | Delta (CHF) |
-|---------------------------|---------------|-----------------|-------------|-------------|
-| Phase A Consumed Off-Peak | 1424          | 953             | -470        | 160         |
-| Phase A Consumed Peak     | 495           | 201             | -293        | 99          |
-| Phase B Consumed Off-Peak | 891           | 450             | -441        | 149         |
-| Phase B Consumed Peak     | 363           | 111             | -252        | 85          |
-| Phase C Consumed Off-Peak | 708           | 305             | -402        | 136         |
-| Phase C Consumed Peak     | 299           | 89              | -210        | 71          |
-| **Total Consumed**        | **4180**      | **2109**        | **-2068**   | **700**     |
+## Analyze results
 
-#### Rentability
+After generating JSON files in `out/`, open:
+- `battery_comparison_month.ipynb`
+- `battery_comparison_season.ipynb`
 
-- **Total gain:** 447 CHF for 337 days or per year: 484 CHF (extrapolated)
-- **Amortization time:** 12.08 years if the cost of the battery is 5847 CHF
+Both notebooks are preconfigured to read:
+- `out/config_Zendure2400_noBattery.json`
+- `out/config_Zendure2400_2880kwh.json`
+- `out/config_Zendure2400_5760kwh.json`
+- `out/config_Zendure2400_8640kwh.json`
+- `out/config_Zendure2400_11520kwh.json`
+- `out/config_Zendure2400_14400kwh.json`
 
-#### Battery Statistics
-This is the statistics for the battery indicating the number of cycles, the expected life, and the remaining energy.
-If the cycles between the phases are different, it means that the battery is not used equally.
+## Configuration format
 
-| Metric                | Phase 1 | Phase 2 | Phase 3 | Max/Config |
-|-----------------------|---------|---------|---------|------------|
-| Cycles                | 215     | 195     | 172     | 6000       |
-| Expected life (years) | 25      | 28      | 32      |            |
-| Remaining energy (Wh) | 0       | 2870    | -2      |            |
+Each JSON config contains:
+- `battery`
+  - `capacity_Wh_per_phase`
+  - `cost_chf`
+  - `max_charge_power_watts`
+  - `max_discharge_power_watts`
+  - `charge_efficiency`
+  - `discharge_efficiency`
+  - `max_cycles`
+  - `initial_soc_percent_per_phase`
+  - `soc_min_pct`
+  - `soc_max_pct`
+- `tariff`
+  - `peak.tariff_consume`
+  - `peak.tariff_inject`
+  - `peak.days` (weekday indexes)
+  - `peak.hours` (hour list)
+  - `off_peak.tariff_consume`
+  - `off_peak.tariff_inject`
 
-#### Battery Status
-This table illustrates the time the battery spends in each status.
-A battery that is fully charged too often may indicate that it is undersized, whereas a battery that is frequently empty may suggest that it is oversized.
-The distribution of charging and discharging can provide insights into whether the battery is used frequently or infrequently. If the discharging percentage exceeds the charging percentage, it indicates that the battery is frequently utilized to reduce grid consumption.
-
-| Status      | Phase 1         | Phase 2         | Phase 3         |
-|-------------|-----------------|-----------------|-----------------|
-| Full        | 38857 (7.99%)   | 65397 (13.46%)  | 90471 (18.61%)  |
-| Empty       | 219304 (45.12%) | 127319 (26.20%) | 83205 (17.12%)  |
-| Discharging | 143384 (29.50%) | 197277 (40.59%) | 225228 (46.34%) |
-| Charging    | 84474 (17.38%)  | 96026 (19.76%)  | 87115 (17.92%)  |
-| **Total**   | **486019**      | **486019**      | **486019**      |
-
-#### Charging and Discharging Power at Peak
-The batteries are designed to charge and discharge at a specific maximum power level.
-Frequent charging at maximum power may suggest the need for a more powerful system or an additional battery connected in parallel. The same consideration applies to discharging.
-
-| Metric                       | Phase 1         | Phase 2         | Phase 3          |
-|------------------------------|-----------------|-----------------|------------------|
-| Charging at Max Power        | 24944 (29.53%)  | 20116 (20.95%)  | 15948 (18.31%)   |
-| Charging Not at Max Power    | 59530 (70.47%)  | 75910 (79.05%)  | 71167 (81.69%)   |
-| Discharging at Max Power     | 6291 (1.74%)    | 4528 (1.40%)    | 0 (0.00%)        |
-| Discharging Not at Max Power | 356099 (98.26%) | 319137 (98.60%) | 486019 (100.00%) |
-
-## Configuration
-The following parameters can be configured in the script:
-
-### Battery Parameters
-- `battery_capacity_Wh`: Battery capacity per phase.
-- `max_charge_power_watts`: Maximum charge power per phase.
-- `max_discharge_power_watts`: Maximum discharge power per phase.
-- `battery_charge_efficiency`: Charge efficiency (default: 90%).
-- `battery_discharge_efficiency`: Discharge efficiency (default: 90%).
-- `battery_max_cycles`: Maximum battery cycles (default: 5000).
-- `battery_cost`: Total cost of the battery (CHF).
-
-#### Example Configuration
-Below is an example of configuring the script for a 12 kWh battery system over 3 phases:
-```python
-battery_capacity_Wh = [3940, 3940, 3940]        # Battery capacity per phase (Wh)
-max_charge_power_watts = [1200, 1200, 1200]     # Max charge power per phase (W)
-max_discharge_power_watts = [1200, 1200, 1200]  # Max discharge power per phase (W)
-battery_charge_efficiency = 0.9                 # Charge efficiency (90%)
-battery_discharge_efficiency = 0.9              # Discharge efficiency (90%)
-battery_max_cycles = 6000                       # Battery lifespan in cycles
-battery_cost = 5847                             # Battery cost (CHF)
-```
-
-### Tariff Configuration
-- `tariff_consume`: Cost of consuming energy (CHF/kWh).
-- `tariff_inject`: Cost of injecting energy (CHF/kWh).
-- `days`: Days for peak tariffs (Monday to Friday).
-- `hours`: Hours for peak tariffs (17:00 to 22:00).
-
-#### Example Tariff Configuration
-```python
-"peak": {
-    "tariff_consume": 0.34,      # CHF/kWh
-    "tariff_inject": 0.10,       # CHF/kWh
-    "days": [0, 1, 2, 3, 4],     # Monday to Friday
-    "hours": range(17, 22)       # 5 PM to 10 PM
-},
-"off_peak": {
-    "tariff_consume": 0.34,      # CHF/kWh for the rest of the time
-    "tariff_inject": 0.10        # CHF/kWh for the rest of the time
-}
-```
+Use `config/config_Zendure2400_2880kwh.json` as a template for new scenarios.
 
 ## License
-This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
-To view a copy of this license, visit http://creativecommons.org/licenses/by-nc/4.0/
 
-## Contributing
-Contributions are welcome! Feel free to fork the repository and submit pull requests.
-
-## Acknowledgments
-This project is inspired by efforts to optimize residential energy usage with renewable energy and battery storage systems.
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0): http://creativecommons.org/licenses/by-nc/4.0/
