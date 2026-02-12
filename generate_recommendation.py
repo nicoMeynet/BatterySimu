@@ -59,14 +59,24 @@ Report content:
     return template.format(report_text=report_text)
 
 
-def call_ollama(model: str, prompt: str, timeout_s: int = 300) -> str:
+def call_ollama(
+    model: str,
+    prompt: str,
+    *,
+    temperature: float,
+    top_p: float,
+    num_ctx: int,
+    timeout_s: int = 300,
+) -> str:
     """Call local Ollama HTTP API and return generated text."""
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": 0.2,
+            "temperature": temperature,
+            "top_p": top_p,
+            "num_ctx": num_ctx,
         },
     }
     req = urllib.request.Request(
@@ -181,6 +191,24 @@ def parse_args() -> argparse.Namespace:
         help="Optional output file (.md/.txt). If omitted, prints to stdout only.",
     )
     parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.2,
+        help="Sampling temperature for Ollama generation (default: 0.2).",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=0.9,
+        help="Nucleus sampling top_p value (default: 0.9).",
+    )
+    parser.add_argument(
+        "--num-ctx",
+        type=int,
+        default=32768,
+        help="Context window size to request from Ollama (default: 32768).",
+    )
+    parser.add_argument(
         "--max-chars",
         type=int,
         default=120000,
@@ -202,7 +230,13 @@ def main() -> None:
 
     clipped = report_text[: args.max_chars]
     prompt = build_prompt(clipped)
-    raw = call_ollama(args.model, prompt)
+    raw = call_ollama(
+        args.model,
+        prompt,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        num_ctx=args.num_ctx,
+    )
     structured = _extract_json_object(raw)
     recommendation = format_recommendation(structured)
 

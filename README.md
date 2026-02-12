@@ -17,7 +17,7 @@ The project compares:
 - `battery_comparison_month.ipynb`: monthly comparison notebook
 - `battery_comparison_season.ipynb`: seasonal comparison notebook
 - `generate_pdf_report.py`: builds a PDF report from exported monthly/seasonal notebook graphs
-- `generate_report.py`: generates a Markdown summary report from a simulation JSON file
+- `generate_recommendation.py`: generates a recommendation from the PDF report via local Ollama
 - `Makefile`: setup and batch run shortcuts
 
 ## Requirements
@@ -27,9 +27,8 @@ The project compares:
   - `pandas`
   - `tabulate`
   - `matplotlib`
-- Optional for notebook automation:
-  - `jupyter`
   - `nbconvert`
+  - `pypdf`
 
 ## Setup
 
@@ -140,7 +139,7 @@ Description:
 
 Input:
 - PDF report from step c (default: `out/battery_graph_report.pdf`)
-- Local Ollama model (default: `llama3.1`)
+- Local Ollama model (default: `llama3.1:70b-instruct-q4_K_M`)
 
 Generated data:
 - `out/recommendation.md` (default)
@@ -161,7 +160,7 @@ ollama serve
 
 In another terminal, prepare/check model:
 ```bash
-ollama pull llama3.1
+ollama pull llama3.1:70b-instruct-q4_K_M
 ollama list
 ```
 
@@ -173,6 +172,9 @@ make recommend
 # Optional custom model/input/output
 make recommend \
   OLLAMA_MODEL=mistral \
+  OLLAMA_TEMPERATURE=0.2 \
+  OLLAMA_TOP_P=0.9 \
+  OLLAMA_NUM_CTX=32768 \
   RECOMMEND_INPUT_PDF=out/my_report.pdf \
   RECOMMEND_OUTPUT=out/my_recommendation.md
 ```
@@ -193,12 +195,13 @@ make simulate_all
 make run_notebooks
 make pdf_report
 make recommend
+make pdf_report
 ```
 
 Or:
 
 ```bash
-make simulate_all run_notebooks pdf_report recommend
+make simulate_all run_notebooks pdf_report recommend pdf_report
 ```
 
 ## Configuration format

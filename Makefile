@@ -17,7 +17,10 @@ NOTEBOOK_TIMEOUT ?= -1
 NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
 RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
 RECOMMEND_OUTPUT ?= out/recommendation.md
-OLLAMA_MODEL ?= llama3.1
+OLLAMA_MODEL ?= llama3.1:70b-instruct-q4_K_M
+OLLAMA_TEMPERATURE ?= 0.2
+OLLAMA_TOP_P ?= 0.9
+OLLAMA_NUM_CTX ?= 32768
 RECOMMENDATION_FILE ?= out/recommendation.md
 
 DATASETS := \
@@ -133,4 +136,7 @@ recommend:
 	@$(VENV_DIR)/bin/python generate_recommendation.py \
 		"$(RECOMMEND_INPUT_PDF)" \
 		--model "$(OLLAMA_MODEL)" \
+		--temperature "$(OLLAMA_TEMPERATURE)" \
+		--top-p "$(OLLAMA_TOP_P)" \
+		--num-ctx "$(OLLAMA_NUM_CTX)" \
 		--output "$(RECOMMEND_OUTPUT)"
