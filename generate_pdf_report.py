@@ -141,6 +141,12 @@ The simulator uses this real-world baseline to perform controlled charge/dischar
 
 Accurate input data is essential, as simulation quality directly depends on measurement quality."""
 
+COPYRIGHT_SHORT = "Copyright (c) 2026 Nicolas Meynet"
+LICENSE_SHORT = (
+    "Personal/non-commercial use allowed. "
+    "Commercial or company use: contact nicolas@meynet.ch"
+)
+
 
 def chunked(items: list[Path], size: int) -> Iterable[list[Path]]:
     for i in range(0, len(items), size):
@@ -289,6 +295,8 @@ def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
             color="#d1d5db",
         )
     )
+    ax.text(0.5, 0.06, COPYRIGHT_SHORT, ha="center", va="center", fontsize=9, color="#6b7280")
+    ax.text(0.5, 0.04, LICENSE_SHORT, ha="center", va="center", fontsize=8.5, color="#9ca3af")
 
     pdf.savefig(fig, dpi=220)
     plt.close(fig)
@@ -370,6 +378,9 @@ def draw_structured_text_page(
             continue
         ax.text(x, y, text, ha="left", va="top", fontsize=11, color="#374151")
         y -= line_h
+
+    ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af")
+    ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af")
 
     pdf.savefig(fig, dpi=220)
     plt.close(fig)
@@ -518,6 +529,9 @@ def draw_config_cards_page(
             )
             row_y -= 0.03
 
+    ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af")
+    ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af")
+
     pdf.savefig(fig, dpi=220)
     plt.close(fig)
 
@@ -553,42 +567,60 @@ def draw_image_page(
         color="#6b7280",
     )
 
-    top_slots = [(0.06, 0.54, 0.88, 0.35), (0.06, 0.10, 0.88, 0.35)]
-    for slot, image_path in zip(top_slots, images):
+    if len(images) == 1:
+        block_slots = [(0.06, 0.09, 0.88, 0.82)]
+    else:
+        block_slots = [(0.06, 0.52, 0.88, 0.43), (0.06, 0.05, 0.88, 0.43)]
+
+    for slot, image_path in zip(block_slots, images):
         left, bottom, width, height = slot
-        ax = fig.add_axes([left, bottom, width, height])
+        title_y = bottom + height - 0.008
+        desc_y = bottom + height - 0.038
+        image_bottom = bottom
+        image_height = height - 0.050
+
+        # Draw title/description outside of the image area to avoid overlap.
+        ax_bg.text(
+            left,
+            title_y,
+            clean_caption(image_path),
+            ha="left",
+            va="top",
+            fontsize=11,
+            fontweight="bold",
+            color="#374151",
+        )
+        ax_bg.text(
+            left,
+            desc_y,
+            graph_description(image_path),
+            ha="left",
+            va="top",
+            fontsize=9.5,
+            color="#6b7280",
+        )
+
+        ax = fig.add_axes([left, image_bottom, width, image_height])
         ax.axis("off")
 
         img = mpimg.imread(image_path)
         ax.imshow(img)
         ax.set_aspect("auto")
-        ax.text(
-            0.0,
-            1.02,
-            clean_caption(image_path),
-            transform=ax.transAxes,
-            ha="left",
-            va="bottom",
-            fontsize=11,
-            fontweight="bold",
-            color="#374151",
-        )
-        ax.text(
-            0.0,
-            0.97,
-            graph_description(image_path),
-            transform=ax.transAxes,
-            ha="left",
-            va="bottom",
-            fontsize=9.5,
-            color="#6b7280",
-        )
 
     ax_bg.text(
         0.06,
         0.03,
-        "Battery simulation notebook export",
+        f"Battery simulation notebook export | {COPYRIGHT_SHORT}",
         ha="left",
+        va="bottom",
+        fontsize=9,
+        color="#9ca3af",
+    )
+    ax_bg.text(
+        0.94,
+        0.03,
+        "License: CC BY-NC 4.0",
+        ha="right",
         va="bottom",
         fontsize=9,
         color="#9ca3af",

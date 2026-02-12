@@ -170,4 +170,13 @@ Use `config/config_Zendure2400_2880kwh.json` as a template for new scenarios.
 
 ## License
 
-Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0): http://creativecommons.org/licenses/by-nc/4.0/
+Copyright (c) 2026 Nicolas Meynet.
+
+This project is available under Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0):  
+http://creativecommons.org/licenses/by-nc/4.0/
+
+Usage summary:
+- Personal and non-commercial use is allowed.
+- For commercial/company/product usage, contact: `nicolas@meynet.ch`
+
+See `LICENSE` for details.
