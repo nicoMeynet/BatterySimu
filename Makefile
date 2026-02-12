@@ -55,13 +55,7 @@ DATASETS := \
 	dataset/2025/2025_history_phase_b_1dec2024-1dec2025.csv \
 	dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv
 
-CONFIGS := \
-	config/config_Zendure2400_11520kwh.json \
-	config/config_Zendure2400_14400kwh.json \
-	config/config_Zendure2400_2880kwh.json \
-	config/config_Zendure2400_5760kwh.json \
-	config/config_Zendure2400_8640kwh.json \
-	config/config_Zendure2400_noBattery.json
+CONFIGS := $(sort $(wildcard config/*.json))
 
 SIMULATION_JSONS := $(patsubst config/%.json,out/%.json,$(CONFIGS))
 
