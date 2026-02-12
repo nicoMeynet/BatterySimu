@@ -21,11 +21,11 @@ RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
 RECOMMEND_OUTPUT ?= out/recommendation.md
 # Ollama model selection (uncomment one if you want to switch default)
 # Recommended for MacBook Pro 48GB RAM: good quality/speed/stability balance
-OLLAMA_MODEL ?= qwen3:14b
+# OLLAMA_MODEL ?= qwen3:14b
 # OLLAMA_MODEL ?= llama3.1:latest
 # OLLAMA_MODEL ?= mixtral:8x7b-instruct-v0.1-q4_K_M
 # OLLAMA_MODEL ?= gemma3:27b
-# OLLAMA_MODEL ?= gemma3:12b
+OLLAMA_MODEL ?= gemma3:12b
 # OLLAMA_MODEL ?= gpt-oss:20b
 # OLLAMA_MODEL ?= mistral:7b-instruct
 # OLLAMA_MODEL ?= llama3.2:3b
