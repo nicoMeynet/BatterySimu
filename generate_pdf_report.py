@@ -345,6 +345,69 @@ def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
     plt.close(fig)
 
 
+def draw_toc_page(
+    pdf: PdfPages,
+    entries: list[tuple[str, int]],
+    page_index: int,
+    total_pages: int,
+) -> None:
+    """Render a table of contents page with chapter start pages."""
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
+
+    ax.text(
+        0.06,
+        0.965,
+        "Table of Contents",
+        ha="left",
+        va="top",
+        fontsize=20,
+        fontweight="bold",
+        color="#111827",
+        transform=ax.transAxes,
+    )
+    ax.text(
+        0.94,
+        0.965,
+        f"Page {page_index}/{total_pages}",
+        ha="right",
+        va="top",
+        fontsize=10,
+        color="#6b7280",
+        transform=ax.transAxes,
+    )
+
+    y = 0.90
+    if not entries:
+        ax.text(
+            0.08,
+            y,
+            "No chapters available.",
+            ha="left",
+            va="top",
+            fontsize=12,
+            color="#6b7280",
+            transform=ax.transAxes,
+        )
+        y -= 0.06
+    for idx, (title, start_page) in enumerate(entries, start=1):
+        left = f"{idx}. {title}"
+        right = str(start_page)
+        ax.text(0.08, y, left, ha="left", va="top", fontsize=12, color="#374151", transform=ax.transAxes)
+        ax.text(0.92, y, right, ha="right", va="top", fontsize=12, color="#111827", fontweight="bold", transform=ax.transAxes)
+        ax.text(0.08, y - 0.012, "·" * 120, ha="left", va="top", fontsize=8, color="#e5e7eb", transform=ax.transAxes)
+        y -= 0.06
+        if y < 0.12:
+            break
+
+    ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af", transform=ax.transAxes)
+    ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af", transform=ax.transAxes)
+
+    pdf.savefig(fig, dpi=220)
+    plt.close(fig)
+
+
 def draw_structured_text_page(
     pdf: PdfPages,
     title: str,
@@ -768,6 +831,7 @@ def build_pdf(
     methodology_text: str,
     scope_text: str,
     data_requirements_text: str,
+    recommendation_text: str,
     input_data_summary: dict | None,
     configuration_rows: list[dict],
     monthly_images: list[Path],
@@ -785,41 +849,49 @@ def build_pdf(
         if data_requirements_text.strip()
         else []
     )
+    recommendation_pages = (
+        paginate_structured_lines(parse_structured_text(recommendation_text))
+        if recommendation_text.strip()
+        else []
+    )
     config_page_count = len(list(chunked(configuration_rows, 2))) if configuration_rows else 0
     input_data_page_count = 1 if input_data_summary else 0
     section_page_counts = [len(list(chunked(images, 2))) for _, images in section_specs]
-    total_pages = (
-        1
-        + len(intro_pages)
-        + len(methodology_pages)
-        + len(scope_pages)
-        + len(data_requirements_pages)
-        + input_data_page_count
-        + config_page_count
-        + sum(section_page_counts)
-    )
+    toc_page_count = 1
+    chapter_counts = [
+        ("Introduction", len(intro_pages)),
+        ("Report Scope", len(scope_pages)),
+        ("AI Recommendation", len(recommendation_pages)),
+        ("Input Data Ingested", input_data_page_count),
+        ("Monthly Graphs", section_page_counts[0]),
+        ("Seasonal Graphs", section_page_counts[1]),
+        ("Simulation Methodology", len(methodology_pages)),
+        ("Data Requirements", len(data_requirements_pages)),
+        ("Configuration Used", config_page_count),
+    ]
+
+    total_pages = 1 + toc_page_count + sum(count for _, count in chapter_counts)
+
+    toc_entries: list[tuple[str, int]] = []
+    next_page = 1 + toc_page_count + 1  # Cover + TOC + first chapter page
+    for chapter_title, count in chapter_counts:
+        if count > 0:
+            toc_entries.append((chapter_title, next_page))
+            next_page += count
+
     page_index = 1
 
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     with PdfPages(output_pdf) as pdf:
         draw_cover(pdf, title, subtitle)
         page_index += 1
+        draw_toc_page(pdf, toc_entries, page_index, total_pages)
+        page_index += 1
 
         for i, page_lines in enumerate(intro_pages):
             draw_structured_text_page(
                 pdf=pdf,
                 title="Introduction",
-                page_lines=page_lines,
-                is_continuation=(i > 0),
-                page_index=page_index,
-                total_pages=total_pages,
-            )
-            page_index += 1
-
-        for i, page_lines in enumerate(methodology_pages):
-            draw_structured_text_page(
-                pdf=pdf,
-                title="Simulation Methodology",
                 page_lines=page_lines,
                 is_continuation=(i > 0),
                 page_index=page_index,
@@ -838,10 +910,10 @@ def build_pdf(
             )
             page_index += 1
 
-        for i, page_lines in enumerate(data_requirements_pages):
+        for i, page_lines in enumerate(recommendation_pages):
             draw_structured_text_page(
                 pdf=pdf,
-                title="Data Requirements",
+                title="AI Recommendation",
                 page_lines=page_lines,
                 is_continuation=(i > 0),
                 page_index=page_index,
@@ -853,15 +925,6 @@ def build_pdf(
             draw_input_data_page(
                 pdf=pdf,
                 summary=input_data_summary,
-                page_index=page_index,
-                total_pages=total_pages,
-            )
-            page_index += 1
-
-        for config_chunk in chunked(configuration_rows, 2):
-            draw_config_cards_page(
-                pdf=pdf,
-                rows=config_chunk,
                 page_index=page_index,
                 total_pages=total_pages,
             )
@@ -879,6 +942,37 @@ def build_pdf(
                     total_pages=total_pages,
                 )
                 page_index += 1
+
+        for i, page_lines in enumerate(methodology_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="Simulation Methodology",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(data_requirements_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="Data Requirements",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for config_chunk in chunked(configuration_rows, 2):
+            draw_config_cards_page(
+                pdf=pdf,
+                rows=config_chunk,
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -947,6 +1041,14 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Simulation output JSON files used to summarize input data ingested.",
     )
+    parser.add_argument(
+        "--recommendation-file",
+        default=None,
+        help=(
+            "Optional text/markdown file containing AI recommendation to embed in the PDF "
+            "(for example out/recommendation.md)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -963,6 +1065,11 @@ def main() -> None:
     )
     configuration_rows = load_configuration_rows(config_paths) if config_paths else []
     input_data_summary = load_input_data_summary(simulation_paths, len(config_paths))
+    recommendation_text = ""
+    if args.recommendation_file:
+        rec_path = Path(args.recommendation_file)
+        if rec_path.exists() and rec_path.is_file():
+            recommendation_text = rec_path.read_text(encoding="utf-8").strip()
     output_pdf = Path(args.output)
 
     build_pdf(
@@ -973,6 +1080,7 @@ def main() -> None:
         methodology_text=args.methodology,
         scope_text=args.scope,
         data_requirements_text=args.data_requirements,
+        recommendation_text=recommendation_text,
         input_data_summary=input_data_summary,
         configuration_rows=configuration_rows,
         monthly_images=monthly_images,

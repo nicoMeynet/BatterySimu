@@ -130,18 +130,75 @@ make pdf_report PDF_REPORT_OUTPUT=out/my_report.pdf
 Example output file:
 - `out/battery_graph_report.pdf`
 
+Note:
+- `make pdf_report` automatically includes recommendation text from `out/recommendation.md` when that file exists.
+
+### d) AI recommendation from PDF (local Ollama)
+
+Description:
+- Use a local LLM via Ollama to read the generated PDF report and produce a battery configuration recommendation.
+
+Input:
+- PDF report from step c (default: `out/battery_graph_report.pdf`)
+- Local Ollama model (default: `llama3.1`)
+
+Generated data:
+- `out/recommendation.md` (default)
+
+Setup:
+```bash
+# Python deps (inside venv)
+venv/bin/python -m pip install -r requirements.txt
+
+# Install Ollama (macOS/Homebrew)
+brew install ollama
+```
+
+Start Ollama server:
+```bash
+ollama serve
+```
+
+In another terminal, prepare/check model:
+```bash
+ollama pull llama3.1
+ollama list
+```
+
+Commands:
+```bash
+# Default recommendation flow
+make recommend
+
+# Optional custom model/input/output
+make recommend \
+  OLLAMA_MODEL=mistral \
+  RECOMMEND_INPUT_PDF=out/my_report.pdf \
+  RECOMMEND_OUTPUT=out/my_recommendation.md
+```
+
+Example output file:
+- `out/recommendation.md`
+
+To embed recommendation in PDF:
+```bash
+make recommend
+make pdf_report
+```
+
 ### End-to-end shortcut
 
 ```bash
 make simulate_all
 make run_notebooks
 make pdf_report
+make recommend
 ```
 
 Or:
 
 ```bash
-make simulate_all run_notebooks pdf_report
+make simulate_all run_notebooks pdf_report recommend
 ```
 
 ## Configuration format

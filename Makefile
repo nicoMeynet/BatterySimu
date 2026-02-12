@@ -15,6 +15,10 @@ MONTH_NOTEBOOK ?= battery_comparison_month.ipynb
 SEASON_NOTEBOOK ?= battery_comparison_season.ipynb
 NOTEBOOK_TIMEOUT ?= -1
 NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
+RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
+RECOMMEND_OUTPUT ?= out/recommendation.md
+OLLAMA_MODEL ?= llama3.1
+RECOMMENDATION_FILE ?= out/recommendation.md
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -115,9 +119,18 @@ pdf_report:
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
 		--configs $(CONFIGS) \
 		--simulation-jsons $(SIMULATION_JSONS) \
+		--recommendation-file "$(RECOMMENDATION_FILE)" \
 		--monthly $$monthly_files \
 		--seasonal $$seasonal_files \
 		--output "$(PDF_REPORT_OUTPUT)" \
 		--title "$(PDF_REPORT_TITLE)" \
 		--subtitle "$(PDF_REPORT_SUBTITLE)" \
 		--intro "$(PDF_REPORT_INTRO)"
+
+.PHONY: recommend
+recommend:
+	@echo "Generating recommendation from PDF with local Ollama..."
+	@$(VENV_DIR)/bin/python generate_recommendation.py \
+		"$(RECOMMEND_INPUT_PDF)" \
+		--model "$(OLLAMA_MODEL)" \
+		--output "$(RECOMMEND_OUTPUT)"
