@@ -29,6 +29,8 @@ CONFIGS := \
 	config/config_Zendure2400_8640kwh.json \
 	config/config_Zendure2400_noBattery.json
 
+SIMULATION_JSONS := $(patsubst config/%.json,out/%.json,$(CONFIGS))
+
 .PHONY: all
 all: venv activate
 
@@ -112,6 +114,7 @@ pdf_report:
 	fi; \
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
 		--configs $(CONFIGS) \
+		--simulation-jsons $(SIMULATION_JSONS) \
 		--monthly $$monthly_files \
 		--seasonal $$seasonal_files \
 		--output "$(PDF_REPORT_OUTPUT)" \

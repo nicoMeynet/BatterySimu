@@ -249,6 +249,49 @@ def load_configuration_rows(config_paths: list[Path]) -> list[dict]:
     return rows
 
 
+def load_input_data_summary(simulation_paths: list[Path], configuration_count: int) -> dict | None:
+    if not simulation_paths:
+        return None
+
+    starts = []
+    ends = []
+    total_points = 0
+    phase_count = None
+
+    for path in sorted(simulation_paths):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        battery_cfg = data.get("configuration", {}).get("battery", {})
+        cap = battery_cfg.get("capacity_Wh_per_phase")
+        if isinstance(cap, list) and phase_count is None:
+            phase_count = len(cap)
+
+        for month in data.get("months", []):
+            r = month.get("range", {})
+            start = r.get("start_date")
+            end = r.get("end_date")
+            samples = r.get("samples_analyzed")
+
+            if start:
+                starts.append(start)
+            if end:
+                ends.append(end)
+            if isinstance(samples, (int, float)):
+                total_points += int(samples)
+
+    if not starts or not ends:
+        return None
+
+    return {
+        "number_of_phases": phase_count if phase_count is not None else 3,
+        "date_from": min(starts),
+        "date_to": max(ends),
+        "number_of_points": total_points,
+        "number_of_configurations": configuration_count,
+    }
+
+
 def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
     fig = plt.figure(figsize=(8.27, 11.69), facecolor="#f6f7fb")
     ax = fig.add_axes([0, 0, 1, 1])
@@ -536,6 +579,69 @@ def draw_config_cards_page(
     plt.close(fig)
 
 
+def draw_input_data_page(
+    pdf: PdfPages,
+    summary: dict,
+    page_index: int,
+    total_pages: int,
+) -> None:
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
+
+    ax.text(
+        0.04,
+        0.95,
+        "Input Data Ingested",
+        ha="left",
+        va="top",
+        fontsize=18,
+        fontweight="bold",
+        color="#111827",
+    )
+    ax.text(
+        0.96,
+        0.95,
+        f"Page {page_index}/{total_pages}",
+        ha="right",
+        va="top",
+        fontsize=10,
+        color="#6b7280",
+    )
+
+    ax.add_patch(
+        plt.Rectangle(
+            (0.08, 0.58),
+            0.84,
+            0.26,
+            linewidth=1.0,
+            edgecolor="#d1d5db",
+            facecolor="#f9fafb",
+            transform=ax.transAxes,
+        )
+    )
+
+    rows = [
+        ("Number of phases", str(summary["number_of_phases"])),
+        ("Date range (from)", str(summary["date_from"])),
+        ("Date range (to)", str(summary["date_to"])),
+        ("Number of points", str(summary["number_of_points"])),
+        ("Number of configurations", str(summary["number_of_configurations"])),
+    ]
+
+    y = 0.80
+    for label, value in rows:
+        ax.text(0.11, y, label, ha="left", va="top", fontsize=11, color="#374151", fontweight="bold")
+        ax.text(0.52, y, value, ha="left", va="top", fontsize=11, color="#111827")
+        y -= 0.045
+
+    ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af")
+    ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af")
+
+    pdf.savefig(fig, dpi=220)
+    plt.close(fig)
+
+
 def draw_image_page(
     pdf: PdfPages,
     section_title: str,
@@ -662,6 +768,7 @@ def build_pdf(
     methodology_text: str,
     scope_text: str,
     data_requirements_text: str,
+    input_data_summary: dict | None,
     configuration_rows: list[dict],
     monthly_images: list[Path],
     seasonal_images: list[Path],
@@ -679,6 +786,7 @@ def build_pdf(
         else []
     )
     config_page_count = len(list(chunked(configuration_rows, 2))) if configuration_rows else 0
+    input_data_page_count = 1 if input_data_summary else 0
     section_page_counts = [len(list(chunked(images, 2))) for _, images in section_specs]
     total_pages = (
         1
@@ -686,6 +794,7 @@ def build_pdf(
         + len(methodology_pages)
         + len(scope_pages)
         + len(data_requirements_pages)
+        + input_data_page_count
         + config_page_count
         + sum(section_page_counts)
     )
@@ -735,6 +844,15 @@ def build_pdf(
                 title="Data Requirements",
                 page_lines=page_lines,
                 is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        if input_data_summary:
+            draw_input_data_page(
+                pdf=pdf,
+                summary=input_data_summary,
                 page_index=page_index,
                 total_pages=total_pages,
             )
@@ -823,6 +941,12 @@ def parse_args() -> argparse.Namespace:
             "Supports both raw config files and simulation output JSON files."
         ),
     )
+    parser.add_argument(
+        "--simulation-jsons",
+        nargs="*",
+        default=[],
+        help="Simulation output JSON files used to summarize input data ingested.",
+    )
     return parser.parse_args()
 
 
@@ -832,7 +956,13 @@ def main() -> None:
     monthly_images = validate_images(args.monthly, "monthly")
     seasonal_images = validate_images(args.seasonal, "seasonal")
     config_paths = validate_json_paths(args.configs, "config") if args.configs else []
+    simulation_paths = (
+        validate_json_paths(args.simulation_jsons, "simulation")
+        if args.simulation_jsons
+        else []
+    )
     configuration_rows = load_configuration_rows(config_paths) if config_paths else []
+    input_data_summary = load_input_data_summary(simulation_paths, len(config_paths))
     output_pdf = Path(args.output)
 
     build_pdf(
@@ -843,6 +973,7 @@ def main() -> None:
         methodology_text=args.methodology,
         scope_text=args.scope,
         data_requirements_text=args.data_requirements,
+        input_data_summary=input_data_summary,
         configuration_rows=configuration_rows,
         monthly_images=monthly_images,
         seasonal_images=seasonal_images,
