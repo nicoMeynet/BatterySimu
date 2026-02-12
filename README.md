@@ -194,6 +194,37 @@ make recommend \
   RECOMMEND_OUTPUT=out/my_recommendation.md
 ```
 
+Troubleshooting (`make recommend`):
+
+If you get:
+```text
+Error: Ollama API error at http://127.0.0.1:11434/api/generate:
+{"error":"model runner has unexpectedly stopped ... resource limitations ..."}
+```
+
+Use this checklist:
+```bash
+# 1) If this fails with "address already in use", Ollama is already running
+ollama serve
+
+# 2) Server connectivity
+curl http://127.0.0.1:11434/api/tags
+
+# 3) Direct model test
+ollama run llama3.1:70b-instruct-q4_K_M "say hello"
+```
+
+If step 3 fails with the same 500 error, the model is too heavy for available resources (or context is too large).  
+Use a smaller model and/or lower context:
+```bash
+make recommend OLLAMA_MODEL=llama3.1:8b-instruct-q4_K_M OLLAMA_NUM_CTX=8192
+```
+
+Optional (keep 70B but reduce context):
+```bash
+make recommend OLLAMA_MODEL=llama3.1:70b-instruct-q4_K_M OLLAMA_NUM_CTX=4096
+```
+
 Example output file:
 - `out/recommendation.md`
 

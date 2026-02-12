@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -69,6 +70,8 @@ def call_ollama(
     timeout_s: int = 300,
 ) -> str:
     """Call local Ollama HTTP API and return generated text."""
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+    generate_url = f"{ollama_host}/api/generate"
     payload = {
         "model": model,
         "prompt": prompt,
@@ -80,7 +83,7 @@ def call_ollama(
         },
     }
     req = urllib.request.Request(
-        url="http://127.0.0.1:11434/api/generate",
+        url=generate_url,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -88,10 +91,36 @@ def call_ollama(
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+        details = body.strip() or f"HTTP {exc.code}"
+        if "model" in details.lower() and "not found" in details.lower():
+            raise RuntimeError(
+                f"Ollama model '{model}' is not available.\n"
+                f"Fix:\n"
+                f"  1) ollama list\n"
+                f"  2) ollama pull {model}\n"
+                f"  3) retry: make recommend"
+            ) from exc
+        raise RuntimeError(
+            f"Ollama API error at {generate_url}: {details}\n"
+            f"Fix:\n"
+            f"  - Ensure Ollama is running: ollama serve\n"
+            f"  - Verify API: curl {ollama_host}/api/tags"
+        ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(
-            "Cannot reach Ollama at http://127.0.0.1:11434. "
-            "Ensure Ollama is running and the model is available."
+            f"Cannot reach Ollama at {ollama_host}.\n"
+            f"Reason: {exc.reason}\n"
+            f"Fix:\n"
+            f"  1) Start Ollama: ollama serve\n"
+            f"  2) Check connectivity: curl {ollama_host}/api/tags\n"
+            f"  3) Check model exists: ollama list\n"
+            f"  4) If missing, pull it: ollama pull {model}"
         ) from exc
 
     if "response" not in data:
@@ -179,7 +208,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate battery recommendation from a PDF report using local Ollama."
     )
-    parser.add_argument("pdf_file", help="Path to input PDF report.")
+    parser.add_argument(
+        "pdf_file",
+        nargs="?",
+        default="out/battery_graph_report.pdf",
+        help="Path to input PDF report (default: out/battery_graph_report.pdf).",
+    )
     parser.add_argument(
         "--model",
         default="llama3.1",
