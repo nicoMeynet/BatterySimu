@@ -4,6 +4,7 @@ Build a PDF report from exported notebook graphs.
 
 Example:
   python generate_pdf_report.py \
+    --global out/graphs/global/*.png \
     --monthly out/graphs/monthly/*.png \
     --seasonal out/graphs/seasonal/*.png \
     --output out/battery_graph_report.pdf \
@@ -715,6 +716,7 @@ def draw_image_page(
     fig = plt.figure(figsize=(8.27, 11.69), facecolor="white")
     ax_bg = fig.add_axes([0, 0, 1, 1])
     ax_bg.axis("off")
+    fig_w, fig_h = fig.get_size_inches()
 
     ax_bg.text(
         0.06,
@@ -745,8 +747,6 @@ def draw_image_page(
         left, bottom, width, height = slot
         title_y = bottom + height - 0.008
         desc_y = bottom + height - 0.038
-        image_bottom = bottom
-        image_height = height - 0.050
 
         # Draw title/description outside of the image area to avoid overlap.
         ax_bg.text(
@@ -769,12 +769,32 @@ def draw_image_page(
             color="#6b7280",
         )
 
-        ax = fig.add_axes([left, image_bottom, width, image_height])
-        ax.axis("off")
-
         img = mpimg.imread(image_path)
-        ax.imshow(img)
-        ax.set_aspect("auto")
+        img_h = int(img.shape[0]) if hasattr(img, "shape") and len(img.shape) >= 2 else 1
+        img_w = int(img.shape[1]) if hasattr(img, "shape") and len(img.shape) >= 2 else 1
+        img_ratio = img_w / max(img_h, 1)  # width / height
+
+        # Available area under description text.
+        available_top = desc_y - 0.012
+        available_bottom = bottom
+        max_width = width
+        max_height = max(0.05, available_top - available_bottom)
+
+        # Size axes so image keeps its original aspect ratio without added top whitespace.
+        height_if_full_width = max_width * fig_w / (img_ratio * fig_h)
+        if height_if_full_width <= max_height:
+            ax_width = max_width
+            ax_height = height_if_full_width
+        else:
+            ax_height = max_height
+            ax_width = ax_height * img_ratio * fig_h / fig_w
+
+        ax_left = left + (max_width - ax_width) / 2
+        ax_bottom = available_top - ax_height  # top-align image under text
+
+        ax = fig.add_axes([ax_left, ax_bottom, ax_width, ax_height])
+        ax.axis("off")
+        ax.imshow(img, aspect="auto")
 
     ax_bg.text(
         0.06,
@@ -834,10 +854,12 @@ def build_pdf(
     recommendation_text: str,
     input_data_summary: dict | None,
     configuration_rows: list[dict],
+    global_images: list[Path],
     monthly_images: list[Path],
     seasonal_images: list[Path],
 ) -> None:
     section_specs = [
+        ("Global Graphs", global_images),
         ("Monthly Graphs", monthly_images),
         ("Seasonal Graphs", seasonal_images),
     ]
@@ -863,8 +885,7 @@ def build_pdf(
         ("Report Scope", len(scope_pages)),
         ("AI Recommendation", len(recommendation_pages)),
         ("Input Data Ingested", input_data_page_count),
-        ("Monthly Graphs", section_page_counts[0]),
-        ("Seasonal Graphs", section_page_counts[1]),
+        *[(section_title, count) for (section_title, _), count in zip(section_specs, section_page_counts)],
         ("Simulation Methodology", len(methodology_pages)),
         ("Data Requirements", len(data_requirements_pages)),
         ("Configuration Used", config_page_count),
@@ -977,7 +998,14 @@ def build_pdf(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create a PDF report from monthly and seasonal graph images."
+        description="Create a PDF report from global, monthly and seasonal graph images."
+    )
+    parser.add_argument(
+        "--global",
+        dest="global_images",
+        nargs="*",
+        default=[],
+        help="Optional global graph image files (PNG/JPG/SVG). Shell globs are supported.",
     )
     parser.add_argument(
         "--monthly",
@@ -1055,6 +1083,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    global_images = validate_images(args.global_images, "global") if args.global_images else []
     monthly_images = validate_images(args.monthly, "monthly")
     seasonal_images = validate_images(args.seasonal, "seasonal")
     config_paths = validate_json_paths(args.configs, "config") if args.configs else []
@@ -1083,6 +1112,7 @@ def main() -> None:
         recommendation_text=recommendation_text,
         input_data_summary=input_data_summary,
         configuration_rows=configuration_rows,
+        global_images=global_images,
         monthly_images=monthly_images,
         seasonal_images=seasonal_images,
     )

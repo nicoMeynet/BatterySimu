@@ -7,12 +7,14 @@ REQ_FILE := requirements.txt
 ULIMIT_VALUE ?= 2048
 MONTHLY_GRAPHS_DIR ?= out/month
 SEASONAL_GRAPHS_DIR ?= out/season
+GLOBAL_GRAPHS_DIR ?= out/global
 PDF_REPORT_OUTPUT ?= out/battery_graph_report.pdf
 PDF_REPORT_TITLE ?= Battery Simulation Graph Report
 PDF_REPORT_SUBTITLE ?= Monthly and seasonal comparison charts
 PDF_REPORT_INTRO ?= This report evaluates multiple residential battery configurations to determine the optimal storage size for the household. The analysis is based on real 3-phase grid measurements collected prior to battery installation, and each scenario is compared against an identical no-battery baseline for consistency. The objective is to support a data-driven investment decision by balancing financial return, energy adequacy, and power limitations while selecting the smallest robust configuration.
 MONTH_NOTEBOOK ?= battery_comparison_month.ipynb
 SEASON_NOTEBOOK ?= battery_comparison_season.ipynb
+GLOBAL_NOTEBOOK ?= battery_comparison_global.ipynb
 NOTEBOOK_TIMEOUT ?= -1
 NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
 RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
@@ -82,6 +84,11 @@ run_notebooks:
 		echo "Install it with: $(VENV_DIR)/bin/python -m pip install nbconvert"; \
 		exit 1; \
 	}
+	@echo "Cleaning previous exported graph images (month/season/global)..."
+	@mkdir -p "$(MONTHLY_GRAPHS_DIR)" "$(SEASONAL_GRAPHS_DIR)" "$(GLOBAL_GRAPHS_DIR)"
+	@find "$(MONTHLY_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
+	@find "$(SEASONAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
+	@find "$(GLOBAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
 	@mkdir -p "$(NOTEBOOK_MPLCONFIGDIR)"
 	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m nbconvert \
 		--to notebook \
@@ -95,6 +102,16 @@ run_notebooks:
 		--inplace \
 		--ExecutePreprocessor.timeout=$(NOTEBOOK_TIMEOUT) \
 		"$(SEASON_NOTEBOOK)"
+	@if [ -f "$(GLOBAL_NOTEBOOK)" ]; then \
+		MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m nbconvert \
+			--to notebook \
+			--execute \
+			--inplace \
+			--ExecutePreprocessor.timeout=$(NOTEBOOK_TIMEOUT) \
+			"$(GLOBAL_NOTEBOOK)"; \
+	else \
+		echo "Global notebook not found: $(GLOBAL_NOTEBOOK) (skipping)."; \
+	fi
 
 .PHONY: pdf_report
 pdf_report:
@@ -119,7 +136,20 @@ pdf_report:
 		echo "No seasonal images found in $(SEASONAL_GRAPHS_DIR)"; \
 		exit 1; \
 	fi; \
+	global_args=""; \
+	if [ -d "$(GLOBAL_GRAPHS_DIR)" ]; then \
+		global_files=$$(find "$(GLOBAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) | sort); \
+		if [ -n "$$global_files" ]; then \
+			echo "Including global images from $(GLOBAL_GRAPHS_DIR)"; \
+			global_args="--global $$global_files"; \
+		else \
+			echo "No global images found in $(GLOBAL_GRAPHS_DIR); continuing without global section."; \
+		fi; \
+	else \
+		echo "Global graphs directory does not exist: $(GLOBAL_GRAPHS_DIR) (continuing without global section)."; \
+	fi; \
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
+		$$global_args \
 		--configs $(CONFIGS) \
 		--simulation-jsons $(SIMULATION_JSONS) \
 		--recommendation-file "$(RECOMMENDATION_FILE)" \

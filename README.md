@@ -16,6 +16,7 @@ The project compares:
 - `out/`: generated outputs (`.csv`, `.json`, `.pdf`, and exported graph images)
 - `battery_comparison_month.ipynb`: monthly comparison notebook
 - `battery_comparison_season.ipynb`: seasonal comparison notebook
+- `battery_comparison_global.ipynb`: global (full-range) comparison notebook
 - `generate_pdf_report.py`: builds a PDF report from exported monthly/seasonal notebook graphs
 - `generate_recommendation.py`: generates a recommendation from the PDF report via local Ollama
 - `Makefile`: setup and batch run shortcuts
@@ -78,22 +79,24 @@ Example output files:
 ### b) Notebook analysis and graph export
 
 Description:
-- Execute monthly and seasonal notebooks on simulation JSON outputs.
+- Execute global, monthly, and seasonal notebooks on simulation JSON outputs.
 - Auto-export charts as images for reporting.
 
 Input:
 - Simulation JSON files in `out/*.json` (generated in step a).
 - Notebooks:
+  - `battery_comparison_global.ipynb`
   - `battery_comparison_month.ipynb`
   - `battery_comparison_season.ipynb`
 
 Generated data:
+- `out/global/*.png` (global graphs)
 - `out/month/*.png` (monthly graphs)
 - `out/season/*.png` (seasonal graphs)
 
 Commands:
 ```bash
-# Execute both notebooks and export graphs
+# Execute notebooks and export graphs
 make run_notebooks
 ```
 
@@ -101,14 +104,26 @@ Example output files:
 - `out/month/01_monthly_net_financial_gain_vs_no_battery.png`
 - `out/season/01_seasonal_net_financial_gain_vs_no_battery.png`
 
+Optional manual run (if you want only global):
+```bash
+MPLCONFIGDIR=/tmp/matplotlib venv/bin/python -m nbconvert \
+  --to notebook --execute --inplace battery_comparison_global.ipynb
+```
+
+Global notebook output files:
+- `out/global/01_global_energy_reduction_kwh.png`
+- `out/global/05_global_battery_status_heatmap.png`
+
 ### c) PDF generation
 
 Description:
 - Build a consolidated PDF report from exported graph images.
 - Include intro/methodology/scope/data-requirements sections and configuration cards.
+- If global graphs are available in `out/global`, they are included before monthly and seasonal sections.
 
 Input:
 - Graph images from step b:
+  - `out/global/*.png` (optional, included first if present)
   - `out/month/*.png`
   - `out/season/*.png`
 - Scenario config files:
