@@ -13,9 +13,11 @@ The project compares:
 - `battery_sim.py`: main simulation engine
 - `config/*.json`: battery and tariff scenarios
 - `dataset/`: input CSV files (phase A/B/C power history)
-- `out/`: generated outputs (`.csv` and `.json`)
+- `out/`: generated outputs (`.csv`, `.json`, `.pdf`, and exported graph images)
 - `battery_comparison_month.ipynb`: monthly comparison notebook
 - `battery_comparison_season.ipynb`: seasonal comparison notebook
+- `generate_pdf_report.py`: builds a PDF report from exported monthly/seasonal notebook graphs
+- `generate_report.py`: generates a Markdown summary report from a simulation JSON file
 - `Makefile`: setup and batch run shortcuts
 
 ## Requirements
@@ -38,132 +40,108 @@ source venv/bin/activate
 
 The Makefile also appends `ulimit -n 2048` (configurable) to `venv/bin/activate`.
 
-## Run simulations
+## Step-by-step procedure
 
-### Run one configuration
+### a) Simulation
 
+Description:
+- Run battery simulation scenarios from real 3-phase household data.
+- Compare each scenario against a no-battery baseline under the same tariff assumptions.
+
+Input:
+- 3 CSV files (phase A/B/C) with columns:
+  - `entity_id`
+  - `state` (W)
+  - `last_changed` (timestamp)
+- One or more config files in `config/*.json`.
+
+Generated data:
+- `out/<config-name>.csv` (minute-level simulation table)
+- `out/<config-name>.json` (global/monthly/seasonal structured results)
+
+Commands:
 ```bash
+# One scenario
 python battery_sim.py \
   dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
   dataset/2025/2025_history_phase_b_1dec2024-1dec2025.csv \
   dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv \
   --config config/config_Zendure2400_5760kwh.json
-```
 
-### Run all configured scenarios
-
-```bash
+# All scenarios from Makefile
 make simulate_all
 ```
 
-Current scenarios run by `make simulate_all`:
-- `config/config_Zendure2400_noBattery.json`
-- `config/config_Zendure2400_2880kwh.json`
-- `config/config_Zendure2400_5760kwh.json`
-- `config/config_Zendure2400_8640kwh.json`
-- `config/config_Zendure2400_11520kwh.json`
-- `config/config_Zendure2400_14400kwh.json`
-
-## Inputs
-
-`battery_sim.py` expects 3 CSV files (phase A, B, C) with this schema:
-- `entity_id`
-- `state` (W)
-- `last_changed` (timestamp)
-
-Typical source: Home Assistant export from Shelly 3EM power sensors.
-
-The script:
-- rounds timestamps to minute resolution
-- groups duplicate timestamps by mean power
-- fills missing timestamps by linear interpolation
-
-## Outputs
-
-For each run, outputs are written to `out/` using the config file name:
-- `out/<config-name>.csv`: minute-level simulation table
-- `out/<config-name>.json`: structured report (global + monthly + seasonal metrics)
-
-Example:
-- `--config config/config_Zendure2400_5760kwh.json`
-- output files:
-  - `out/config_Zendure2400_5760kwh.csv`
-  - `out/config_Zendure2400_5760kwh.json`
-
-Console output also includes injected/consumed deltas, gain/amortization, battery status, and charge/discharge usage summaries.
-
-## Analyze results
-
-After generating JSON files in `out/`, open:
-- `battery_comparison_month.ipynb`
-- `battery_comparison_season.ipynb`
-
-Both notebooks are preconfigured to read:
-- `out/config_Zendure2400_noBattery.json`
-- `out/config_Zendure2400_2880kwh.json`
+Example output files:
+- `out/config_Zendure2400_5760kwh.csv`
 - `out/config_Zendure2400_5760kwh.json`
-- `out/config_Zendure2400_8640kwh.json`
-- `out/config_Zendure2400_11520kwh.json`
-- `out/config_Zendure2400_14400kwh.json`
 
-The notebooks are configured to auto-export figures when executed:
-- monthly notebook exports to `out/month`
-- seasonal notebook exports to `out/season`
+### b) Notebook analysis and graph export
 
-### Execute notebooks from Makefile
+Description:
+- Execute monthly and seasonal notebooks on simulation JSON outputs.
+- Auto-export charts as images for reporting.
 
-To regenerate all notebook graphs/images automatically:
+Input:
+- Simulation JSON files in `out/*.json` (generated in step a).
+- Notebooks:
+  - `battery_comparison_month.ipynb`
+  - `battery_comparison_season.ipynb`
 
+Generated data:
+- `out/month/*.png` (monthly graphs)
+- `out/season/*.png` (seasonal graphs)
+
+Commands:
 ```bash
+# Execute both notebooks and export graphs
 make run_notebooks
 ```
 
-## Build a PDF from notebook graphs
+Example output files:
+- `out/month/01_monthly_net_financial_gain_vs_no_battery.png`
+- `out/season/01_seasonal_net_financial_gain_vs_no_battery.png`
 
-Export your notebook charts as image files (for example PNG), then run:
+### c) PDF generation
 
+Description:
+- Build a consolidated PDF report from exported graph images.
+- Include intro/methodology/scope/data-requirements sections and configuration cards.
+
+Input:
+- Graph images from step b:
+  - `out/month/*.png`
+  - `out/season/*.png`
+- Scenario config files:
+  - `config/*.json`
+
+Generated data:
+- `out/battery_graph_report.pdf` (default)
+
+Commands:
 ```bash
-python generate_pdf_report.py \
-  --configs config/*.json \
-  --monthly out/month/*.png \
-  --seasonal out/season/*.png \
-  --output out/battery_graph_report.pdf \
-  --title "Battery Simulation Graph Report" \
-  --subtitle "Monthly and seasonal comparison charts"
+# Default
+make pdf_report
+
+# Optional custom output file
+make pdf_report PDF_REPORT_OUTPUT=out/my_report.pdf
 ```
 
-Notes:
-- `--monthly` and `--seasonal` accept one or more image paths.
-- `--configs` adds a configuration section (nice table) at the beginning of the PDF.
-- Output is a multi-page PDF with cover page, monthly section, and seasonal section.
-- Captions are inferred from each image file name.
+Example output file:
+- `out/battery_graph_report.pdf`
 
-### Recommended end-to-end flow
+### End-to-end shortcut
 
-1. Run simulations:
 ```bash
 make simulate_all
-```
-
-2. Refresh notebook charts (auto `savefig`):
-```bash
 make run_notebooks
+make pdf_report
 ```
 
-3. Build PDF using notebook export folders:
-```bash
-make pdf_report \
-  MONTHLY_GRAPHS_DIR=out/month \
-  SEASONAL_GRAPHS_DIR=out/season \
-  PDF_REPORT_OUTPUT=out/my_report.pdf
-```
+Or:
 
-You can also chain steps 2 and 3:
 ```bash
-make run_notebooks pdf_report \
-  MONTHLY_GRAPHS_DIR=out/month \
-  SEASONAL_GRAPHS_DIR=out/season \
-  PDF_REPORT_OUTPUT=out/my_report.pdf
+make simulate_all run_notebooks pdf_report
 ```
 
 ## Configuration format

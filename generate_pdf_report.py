@@ -148,7 +148,35 @@ def chunked(items: list[Path], size: int) -> Iterable[list[Path]]:
 
 
 def clean_caption(path: Path) -> str:
-    return path.stem.replace("_", " ").replace("-", " ").strip().title()
+    name = path.stem
+    # Drop numeric ordering prefix (e.g. "01_")
+    name = name.lstrip("0123456789").lstrip("_- ")
+    return name.replace("_", " ").replace("-", " ").strip().title()
+
+
+def graph_description(image_path: Path) -> str:
+    key = image_path.stem.lower()
+    key = key.lstrip("0123456789").lstrip("_- ")
+
+    rules = [
+        ("net financial gain", "Shows the net financial benefit versus the no-battery baseline."),
+        ("grid import reduction", "Shows how much grid import is reduced by each battery scenario."),
+        ("grid export reduction", "Shows how much grid export is reduced by storing surplus energy."),
+        ("energy shifting", "Shows the balance between charging and discharging over time."),
+        ("throughput", "Shows total battery energy cycled during the period."),
+        ("equivalent full battery cycles", "Shows estimated equivalent full cycles as a battery usage proxy."),
+        ("battery full", "Shows how often the battery is saturated (potential oversizing signal)."),
+        ("battery empty", "Shows how often the battery is depleted (potential undersizing signal)."),
+        ("undersizing", "Shows structural days where battery energy was insufficient."),
+        ("power saturation", "Shows time spent limited by charge/discharge power constraints."),
+        ("power state distribution", "Shows distribution of operating states across charging/discharging/idle modes."),
+        ("activity duration", "Shows charging and discharging duration over the period."),
+    ]
+
+    for marker, desc in rules:
+        if marker in key:
+            return desc
+    return "Shows comparative battery behavior for this metric across scenarios."
 
 
 def normalize_power(values: list[int | float] | None) -> str:
@@ -544,6 +572,16 @@ def draw_image_page(
             fontsize=11,
             fontweight="bold",
             color="#374151",
+        )
+        ax.text(
+            0.0,
+            0.97,
+            graph_description(image_path),
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=9.5,
+            color="#6b7280",
         )
 
     ax_bg.text(
