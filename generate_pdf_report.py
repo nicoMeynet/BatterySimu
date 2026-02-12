@@ -23,25 +23,123 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-DEFAULT_INTRO = """## Goal
-This report compares battery scenarios to identify an optimal storage size for your home.
-The objective is to maximize self-consumption and financial return while avoiding both oversizing and undersizing.
+DEFAULT_INTRO = """This report evaluates multiple residential battery configurations to determine the optimal storage size for the household. The analysis is based on real 3-phase grid measurements collected prior to battery installation, ensuring that all results reflect actual consumption and injection behavior.
 
-## Simulation Process
-- Input data comes from 3-phase house power measurements (A, B, C) exported from Home Assistant.
-- For each battery configuration, the simulator runs a timestamp-by-timestamp charge/discharge simulation with tariff rules.
-- Results are compared against the no-battery baseline to quantify net gains, import/export reductions, and battery usage behavior.
+Using timestamp-level import and export data, the simulator models tariff-aware charge and discharge decisions under defined battery constraints. Each configuration is evaluated against an identical no-battery baseline, enabling a fair and consistent comparison.
 
-## How To Read The Graphs
-- Monthly charts show short-term variability and help detect transition periods where behavior changes.
-- Seasonal charts highlight stable long-term trends and the influence of weather and consumption patterns.
-- Comparing both views helps separate one-off effects from structural sizing issues.
+To generate meaningful results, the user must provide:
+- Historical grid import and export measurements (without battery)
+- 3-phase power data with adequate time resolution
+- The battery configurations to be tested
+- Applicable tariff parameters
 
-## Decision Criteria For Optimal Battery Size
-- Financial: prioritize annual gain and amortization time.
-- Energy sizing: monitor battery full/empty share and daily/evening undersize percentages.
-- Power sizing: check active and idle power saturation to identify inverter power bottlenecks.
-- Practical target: choose the smallest scenario that keeps undersize and saturation at acceptable levels while preserving strong financial performance."""
+Measurements can be obtained using a 3-phase energy meter (for example Shelly 3EM) integrated with Home Assistant for data collection and export.
+
+The objective is to support a data-driven investment decision by balancing financial return, energy adequacy, and power limitations, selecting the smallest configuration that delivers robust and sustainable performance across the full year."""
+
+DEFAULT_METHODOLOGY = """## 1. Input Data
+- Real 3-phase household consumption data (Phase A, B, C)
+- Timestamp-level power measurements
+- Historical seasonal load patterns
+- Exported data from Home Assistant
+Data granularity ensures realistic modeling of daily and seasonal variability.
+
+## 2. Simulation Engine
+- Timestamp-by-timestamp battery charge/discharge decisions
+- SOC (State of Charge) tracking with min/max constraints
+- Power limitation enforcement (charge and discharge limits)
+- Efficiency modeling (charge and discharge losses)
+- Priority rules for self-consumption optimization
+Battery behavior is evaluated under physical and electrical constraints.
+
+## 3. Tariff Model
+- Peak and off-peak consumption tariffs
+- Injection tariffs for exported energy
+- Net financial gain calculation versus no battery
+- Cost comparison per scenario
+All financial gains are calculated relative to the no-battery baseline.
+
+## 4. Comparison Baseline
+- Identical household load data
+- Same solar production profile
+- No-battery reference case
+- Identical tariff assumptions
+This ensures consistent and fair scenario comparison.
+
+## 5. Key Performance Indicators (KPIs)
+### Financial Indicators
+- Monthly and seasonal net financial gain
+- Grid import reduction
+- Grid export reduction
+### Energy Indicators
+- Battery energy throughput
+- Equivalent full cycles
+- Energy shifting volume
+### Structural Sizing Indicators
+- Battery full SOC share (oversizing indicator)
+- Battery empty SOC share (undersizing indicator)
+- Daily structural undersizing
+- Evening structural undersizing
+### Power Indicators
+- Active power saturation
+- Idle missed opportunities
+- Power state distribution
+These indicators together provide a multi-dimensional sizing assessment."""
+
+DEFAULT_SCOPE = """## 1. Objective
+This report evaluates multiple residential battery storage configurations in order to:
+- Identify the optimal storage capacity for the household
+- Quantify financial impact versus a no-battery baseline
+- Detect structural undersizing or oversizing conditions
+- Assess seasonal robustness and power limitations
+- Support an investment decision based on measurable indicators
+The goal is to select the smallest battery configuration that provides strong financial and operational performance without structural limitations.
+
+## 2. What This Report Covers
+This report includes:
+- Monthly and seasonal energy behavior analysis
+- Financial gain comparison versus no battery
+- Grid import and export reduction metrics
+- Battery utilization indicators (cycles, throughput, activity duration)
+- Energy saturation indicators (battery full / empty share)
+- Structural undersizing metrics (daily and evening)
+- Power saturation indicators (active and idle constraints)
+All results are derived from simulation based on real household load measurements and applied tariff rules.
+
+## 3. What This Report Does Not Cover
+This report does not include:
+- Hardware degradation modeling beyond maximum cycle assumptions
+- Future tariff changes or regulatory impacts
+- Dynamic market price arbitrage
+- Backup power reliability analysis
+- Installation costs or electrical infrastructure upgrades
+- Financing structure or tax optimization
+The analysis is strictly based on operational performance and direct tariff-based financial impact.
+
+## 4. Target Audience
+This report is intended for:
+- Homeowners evaluating battery investments
+- Energy optimization enthusiasts
+- Technical decision makers
+- Financial decision makers assessing ROI
+- System designers reviewing sizing trade-offs
+The document is structured to support both technical and business-level evaluation."""
+
+DEFAULT_DATA_REQUIREMENTS = """To ensure accurate and meaningful results, the simulation requires:
+
+- Historical household consumption measurements without a battery installed
+- Grid import and export power data
+- 3-phase measurements (A, B, C) with timestamp granularity
+- A defined battery configuration for each tested scenario
+
+Measurements can be collected using:
+
+- A 3-phase energy meter such as Shelly 3EM
+- Integration with Home Assistant for data logging and export
+
+The simulator uses this real-world baseline to perform controlled charge/discharge modeling under defined tariff rules.
+
+Accurate input data is essential, as simulation quality directly depends on measurement quality."""
 
 
 def chunked(items: list[Path], size: int) -> Iterable[list[Path]]:
@@ -168,9 +266,11 @@ def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
     plt.close(fig)
 
 
-def draw_intro_page(
+def draw_structured_text_page(
     pdf: PdfPages,
-    intro_text: str,
+    title: str,
+    page_lines: list[tuple[str, str]],
+    is_continuation: bool,
     page_index: int,
     total_pages: int,
 ) -> None:
@@ -181,7 +281,7 @@ def draw_intro_page(
     ax.text(
         0.06,
         0.965,
-        "Introduction",
+        f"{title} (cont.)" if is_continuation else title,
         ha="left",
         va="top",
         fontsize=18,
@@ -201,20 +301,16 @@ def draw_intro_page(
     x = 0.08
     y = 0.88
     line_h = 0.022
-    para_h = 0.012
 
-    for raw_line in intro_text.strip().splitlines():
-        line = raw_line.strip()
-        if not line:
-            y -= para_h
+    for kind, text in page_lines:
+        if kind == "blank":
+            y -= 0.012
             continue
-
-        if line.startswith("## "):
-            heading = line[3:].strip()
+        if kind == "h2":
             ax.text(
                 x,
                 y,
-                heading,
+                text,
                 ha="left",
                 va="top",
                 fontsize=12.5,
@@ -223,50 +319,91 @@ def draw_intro_page(
             )
             y -= line_h * 1.2
             continue
-
-        if line.startswith("- "):
-            bullet_text = line[2:].strip()
-            wrapped = textwrap.wrap(bullet_text, width=92)
-            if not wrapped:
-                continue
+        if kind == "h3":
             ax.text(
                 x,
                 y,
-                f"• {wrapped[0]}",
+                text,
                 ha="left",
                 va="top",
-                fontsize=11,
-                color="#374151",
+                fontsize=11.5,
+                fontweight="bold",
+                color="#1f2937",
             )
-            y -= line_h
-            for cont in wrapped[1:]:
-                ax.text(
-                    x + 0.02,
-                    y,
-                    cont,
-                    ha="left",
-                    va="top",
-                    fontsize=11,
-                    color="#374151",
-                )
-                y -= line_h
+            y -= line_h * 1.1
             continue
-
-        wrapped = textwrap.wrap(line, width=95)
-        for wline in wrapped:
-            ax.text(
-                x,
-                y,
-                wline,
-                ha="left",
-                va="top",
-                fontsize=11,
-                color="#374151",
-            )
+        if kind == "bullet":
+            ax.text(x, y, f"• {text}", ha="left", va="top", fontsize=11, color="#374151")
             y -= line_h
+            continue
+        if kind == "bullet_cont":
+            ax.text(x + 0.02, y, text, ha="left", va="top", fontsize=11, color="#374151")
+            y -= line_h
+            continue
+        ax.text(x, y, text, ha="left", va="top", fontsize=11, color="#374151")
+        y -= line_h
 
     pdf.savefig(fig, dpi=220)
     plt.close(fig)
+
+
+def parse_structured_text(body_text: str) -> list[tuple[str, str]]:
+    lines: list[tuple[str, str]] = []
+    for raw_line in body_text.strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            lines.append(("blank", ""))
+            continue
+        if line.startswith("## "):
+            lines.append(("h2", line[3:].strip()))
+            continue
+        if line.startswith("### "):
+            lines.append(("h3", line[4:].strip()))
+            continue
+        if line.startswith("- "):
+            wrapped = textwrap.wrap(line[2:].strip(), width=92)
+            if wrapped:
+                lines.append(("bullet", wrapped[0]))
+                for cont in wrapped[1:]:
+                    lines.append(("bullet_cont", cont))
+            continue
+        for wline in textwrap.wrap(line, width=95):
+            lines.append(("text", wline))
+    return lines
+
+
+def line_height_units(kind: str) -> float:
+    if kind == "blank":
+        return 0.012
+    if kind == "h2":
+        return 0.022 * 1.2
+    if kind == "h3":
+        return 0.022 * 1.1
+    return 0.022
+
+
+def paginate_structured_lines(
+    structured_lines: list[tuple[str, str]],
+    *,
+    start_y: float = 0.88,
+    min_y: float = 0.08,
+) -> list[list[tuple[str, str]]]:
+    pages: list[list[tuple[str, str]]] = []
+    current: list[tuple[str, str]] = []
+    y = start_y
+
+    for entry in structured_lines:
+        h = line_height_units(entry[0])
+        if y - h < min_y and current:
+            pages.append(current)
+            current = []
+            y = start_y
+        current.append(entry)
+        y -= h
+
+    if current:
+        pages.append(current)
+    return pages
 
 
 def draw_config_cards_page(
@@ -452,6 +589,9 @@ def build_pdf(
     title: str,
     subtitle: str | None,
     intro_text: str,
+    methodology_text: str,
+    scope_text: str,
+    data_requirements_text: str,
     configuration_rows: list[dict],
     monthly_images: list[Path],
     seasonal_images: list[Path],
@@ -460,17 +600,75 @@ def build_pdf(
         ("Monthly Graphs", monthly_images),
         ("Seasonal Graphs", seasonal_images),
     ]
+    intro_pages = paginate_structured_lines(parse_structured_text(intro_text)) if intro_text.strip() else []
+    methodology_pages = paginate_structured_lines(parse_structured_text(methodology_text)) if methodology_text.strip() else []
+    scope_pages = paginate_structured_lines(parse_structured_text(scope_text)) if scope_text.strip() else []
+    data_requirements_pages = (
+        paginate_structured_lines(parse_structured_text(data_requirements_text))
+        if data_requirements_text.strip()
+        else []
+    )
     config_page_count = len(list(chunked(configuration_rows, 2))) if configuration_rows else 0
     section_page_counts = [len(list(chunked(images, 2))) for _, images in section_specs]
-    total_pages = 1 + 1 + config_page_count + sum(section_page_counts)
+    total_pages = (
+        1
+        + len(intro_pages)
+        + len(methodology_pages)
+        + len(scope_pages)
+        + len(data_requirements_pages)
+        + config_page_count
+        + sum(section_page_counts)
+    )
     page_index = 1
 
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     with PdfPages(output_pdf) as pdf:
         draw_cover(pdf, title, subtitle)
         page_index += 1
-        draw_intro_page(pdf, intro_text, page_index, total_pages)
-        page_index += 1
+
+        for i, page_lines in enumerate(intro_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="Introduction",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(methodology_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="Simulation Methodology",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(scope_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="Report Scope",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(data_requirements_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="Data Requirements",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
 
         for config_chunk in chunked(configuration_rows, 2):
             draw_config_cards_page(
@@ -532,6 +730,21 @@ def parse_args() -> argparse.Namespace:
         help="Introduction text shown at the beginning of the PDF report.",
     )
     parser.add_argument(
+        "--methodology",
+        default=DEFAULT_METHODOLOGY,
+        help="Simulation methodology text shown after the introduction page.",
+    )
+    parser.add_argument(
+        "--scope",
+        default=DEFAULT_SCOPE,
+        help="Report scope text shown after the methodology section.",
+    )
+    parser.add_argument(
+        "--data-requirements",
+        default=DEFAULT_DATA_REQUIREMENTS,
+        help="Data requirements text shown after the report scope section.",
+    )
+    parser.add_argument(
         "--configs",
         nargs="*",
         default=[],
@@ -557,6 +770,9 @@ def main() -> None:
         title=args.title,
         subtitle=args.subtitle,
         intro_text=args.intro,
+        methodology_text=args.methodology,
+        scope_text=args.scope,
+        data_requirements_text=args.data_requirements,
         configuration_rows=configuration_rows,
         monthly_images=monthly_images,
         seasonal_images=seasonal_images,
