@@ -23,6 +23,7 @@ PHASE_KEYS = ["A", "B", "C"]
 # LOAD CONFIG FROM FILE
 #####################################################################
 def load_config(path: str) -> dict:
+    """Load simulation configuration from a JSON file path."""
     with open(path, "r") as f:
         return json.load(f)
 
@@ -33,12 +34,14 @@ def load_config(path: str) -> dict:
 # HP = Peak Hours
 # HC = Off-Peak Hours
 def get_current_tariff_mode(hour, day):
+    """Return tariff mode (HP/HC) for a given hour and weekday index."""
     if day in tariff_config["peak"]["days"] and hour in tariff_config["peak"]["hours"]:
         return "HP" # Peak hours
     return "HC" # Off-peak hours
 
 # ---- Function to determine the current tariff price ----
 def get_current_tariff_price(tariff_mode, action):
+    """Return configured tariff price for a mode/action pair."""
     if tariff_mode == "HP":
         if action == "consume":
             return tariff_config["peak"]["tariff_consume"]
@@ -53,10 +56,12 @@ def get_current_tariff_price(tariff_mode, action):
 
 # ---- Function to calculate energy in Wh ----
 def calculate_energy_Wh(power_watts, duration_minutes):
+    """Convert power over a duration in minutes to energy in Wh."""
     return power_watts * duration_minutes / 60
 
 # ---- Update the consumed or injected energy for a given phase and tariff mode ----
 def update_energy(energy, tariff_mode, consumed_dict, injected_dict, phase):
+    """Accumulate consumed or injected energy for one phase and tariff mode."""
     if energy < 0:
         injected_dict[phase][tariff_mode] += abs(energy)
     else:
@@ -64,6 +69,7 @@ def update_energy(energy, tariff_mode, consumed_dict, injected_dict, phase):
 
 # ---- Simulation ----
 def simulate_battery_behavior(house_grid_power_watts):
+    """Simulate one timestep of battery behavior for the 3 phases."""
     global energy_in_battery_Wh 
 
     # Calculate production and consumption per phase
@@ -205,6 +211,7 @@ def simulate_battery_behavior(house_grid_power_watts):
 
 # ---- JSON Report Building ----
 def build_configuration_section():
+    """Return the active configuration used for this simulation run."""
     return config
 
 # ---- JSON Report Helpers ----
@@ -225,6 +232,7 @@ def compute_configuration_hash(configuration: dict) -> str:
 
 #---- JSON Report Builder ----
 def build_json_report(simulation_ranges, seasonal_profitability=None):
+    """Build final JSON payload from global/monthly ranges and seasonal summary."""
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
 
@@ -255,11 +263,13 @@ def build_json_report(simulation_ranges, seasonal_profitability=None):
 
 #---- JSON Report Exporter ----
 def export_json_report(report, filename="simulation_report.json"):
+    """Write JSON report to disk with indentation for readability."""
     with open(filename, "w") as f:
         json.dump(report, f, indent=2)
     print(f"+ JSON report exported to {filename}")
 
 def build_range_metadata(df, duration_days):
+    """Build standardized metadata for a simulation range dataframe."""
     return {
         "start_date": df["timestamp"].min().isoformat(),
         "end_date": df["timestamp"].max().isoformat(),
@@ -273,6 +283,7 @@ def build_battery_statistics(
     cycles=None,
     battery_max_cycles=None
 ):
+    """Build battery statistics section from simulated dataframe metrics."""
     return {
         "measured_cycles": cycles,
         "cycle_definition": "1.0 = full charge + discharge",
@@ -285,7 +296,9 @@ def build_battery_statistics(
     }
 
 def compute_battery_status(df):
+    """Compute per-phase status distribution percentages from simulated statuses."""
     def stats(col):
+        """Compute sample count and percentage per battery status for one column."""
         total = len(df)
         return {
             status: {
@@ -545,6 +558,7 @@ def compute_energy_and_rentability_from_df(df):
             consumed_with[phase][t] += with_batt[mask & (with_batt > 0)].sum()
 
     def wh_to_kwh(x):
+        """Convert Wh value to rounded kWh."""
         return round(x / 1000, 3)
 
     injected_table = []
@@ -606,6 +620,7 @@ def compute_energy_and_rentability_from_df(df):
     }
 
 def print_progress_bar(current, total, prefix="Progress"):
+    """Render a single-line progress bar in the console."""
     percent = current / total * 100
     bar_width = 40
     filled = int(percent / 100 * bar_width)
@@ -615,6 +630,7 @@ def print_progress_bar(current, total, prefix="Progress"):
     sys.stdout.flush()
 
 def compute_battery_utilization(cycles, duration_days, max_cycles):
+    """Compute cycles/year and expected life indicators per phase."""
     if cycles is None or duration_days <= 0 or battery_capacity_total_kwh <= 0:
         return None
 
@@ -650,9 +666,11 @@ def compute_battery_utilization(cycles, duration_days, max_cycles):
     }
 
 def empty_energy_dict():
+    """Create a zero-initialized energy accumulator by phase and tariff mode."""
     return {p: {"HP": 0, "HC": 0} for p in PHASE_KEYS}
 
 def round_value(x, digits=2, eps=1e-2):
+    """Round numeric values and normalize near-zero noise to 0.0."""
     if not isinstance(x, (int, float)):
         return x
     v = round(x, digits)
@@ -685,9 +703,11 @@ def financial_effect(delta_kwh: float, category: str) -> str:
     raise ValueError(f"Unknown category: {category}")
 
 def is_monthly_range(r):
+    """Return True when a range dictionary is a monthly range."""
     return r.get("range_type") == "monthly"
 
 def month_to_season(month: int) -> str:
+    """Map calendar month number to meteorological season label."""
     if month in (12, 1, 2):
         return "winter"
     if month in (6, 7, 8):
@@ -697,6 +717,7 @@ def month_to_season(month: int) -> str:
     return "autumn"
 
 def compute_seasonal_profitability(ranges):
+    """Aggregate monthly simulation ranges into seasonal profitability metrics."""
     monthly = []
 
     for rng in ranges:
@@ -1055,6 +1076,7 @@ def compute_seasonal_profitability(ranges):
     }
 
 def is_full_month_range(start_dt, end_dt, samples):
+    """Return True if a range fully covers one calendar month at minute granularity."""
     year = start_dt.year
     month = start_dt.month
 
@@ -1397,6 +1419,7 @@ def compute_daily_evening_undersize(df_day):
     return was_full and became_empty
 
 def compute_battery_headroom_from_df(df):
+    """Compute aggregated charge/discharge headroom in kWh from dataframe columns."""
     charge_cols = [
         "battery_charge_headroom_phase_A_Wh",
         "battery_charge_headroom_phase_B_Wh",
@@ -1418,6 +1441,7 @@ def compute_battery_headroom_from_df(df):
     }
 
 def aggregate_power_usage(monthly_usages):
+    """Aggregate monthly power-usage blocks into a single global usage block."""
     if not monthly_usages:
         return None
 
@@ -1457,6 +1481,7 @@ def aggregate_power_usage(monthly_usages):
     return out
 
 def _mk_atmax_block(at_max_count, not_at_max_count, samples_analyzed):
+    """Build a standardized at-max/not-at-max count and percentage block."""
     return {
         "at_max": {
             "sample_count": int(at_max_count),
@@ -1844,6 +1869,7 @@ else:
 print("")
 # Battery statistics
 def expected_life(cycles):
+    """Estimate battery life in years from measured cycles over simulated duration."""
     return (
         int(battery_max_cycles / cycles * duration_days_global / 365)
         if cycles > 0
@@ -1930,6 +1956,7 @@ battery_discharging_not_max_power_phase_B = results_df[(results_df["discharge_po
 battery_discharging_not_max_power_phase_C = results_df[(results_df["discharge_power_phase_C_W"] != max_discharge_power_watts[2]) & (results_df["discharge_power_phase_C_W"] != 0)].shape[0]
 
 def pct(part, total):
+    """Return formatted percentage string or n/a when denominator is zero."""
     return f"{(part / total * 100):.2f}%" if total > 0 else "n/a"
 
 # Create a table for charging and discharging power at the peak
@@ -2144,4 +2171,3 @@ json_report = build_json_report(
     seasonal_profitability=seasonal_profitability
 )
 export_json_report(json_report, json_output_file)
-
