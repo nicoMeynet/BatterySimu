@@ -5,9 +5,9 @@ PYTHON := $(shell command -v /opt/homebrew/bin/python3.12 || command -v python3)
 VENV_DIR := venv
 REQ_FILE := requirements.txt
 ULIMIT_VALUE ?= 2048
-MONTHLY_GRAPHS_DIR ?= out/month
-SEASONAL_GRAPHS_DIR ?= out/season
-GLOBAL_GRAPHS_DIR ?= out/global
+MONTHLY_GRAPHS_DIR ?= out/month_pictures
+SEASONAL_GRAPHS_DIR ?= out/season_pictures
+GLOBAL_GRAPHS_DIR ?= out/global_pictures
 PDF_REPORT_OUTPUT ?= out/battery_graph_report.pdf
 PDF_REPORT_TITLE ?= Battery Simulation Graph Report
 PDF_REPORT_SUBTITLE ?= Monthly and seasonal comparison charts
@@ -18,7 +18,7 @@ GLOBAL_NOTEBOOK ?= battery_comparison_global.ipynb
 NOTEBOOK_TIMEOUT ?= -1
 NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
 RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
-RECOMMEND_OUTPUT ?= out/recommendation.md
+RECOMMEND_OUTPUT ?= out/simulation_llm/recommendation_ollama.md
 # Ollama model selection (uncomment one if you want to switch default)
 # Recommended for MacBook Pro 48GB RAM: good quality/speed/stability balance
 # OLLAMA_MODEL ?= qwen3:14b
@@ -48,7 +48,7 @@ OLLAMA_MODEL ?= gemma3:12b
 OLLAMA_TEMPERATURE ?= 0.2
 OLLAMA_TOP_P ?= 0.9
 OLLAMA_NUM_CTX ?= 8192
-RECOMMENDATION_FILE ?= out/recommendation.md
+RECOMMENDATION_FILE ?= out/simulation_llm/recommendation_ollama.md
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -57,7 +57,7 @@ DATASETS := \
 
 CONFIGS := $(sort $(wildcard config/config_*.json))
 
-SIMULATION_JSONS := $(patsubst config/%.json,out/%.json,$(CONFIGS))
+SIMULATION_JSONS := $(patsubst config/%.json,out/simulation_json/%.json,$(CONFIGS))
 
 .PHONY: help
 help:
@@ -78,6 +78,7 @@ help:
 	@echo "  make run_notebooks"
 	@echo "  make pdf_report"
 	@echo "  make recommend"
+	@echo "  make pdf_report   # rebuild PDF to include recommendation"
 
 .PHONY: all
 all: venv activate

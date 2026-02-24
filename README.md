@@ -11,9 +11,10 @@ The project compares:
 ## What is in this repo
 
 - `battery_sim.py`: main simulation engine
-- `config/*.json`: battery and tariff scenarios
+- `config/config_*.json`: battery scenarios (battery-only config)
+- `config/energy_tariff.json`: global tariff configuration shared by all scenarios
 - `dataset/`: input CSV files (phase A/B/C power history)
-- `out/`: generated outputs (`.csv`, `.json`, `.pdf`, and exported graph images)
+- `out/`: generated outputs (simulations, graph images, PDF report, LLM recommendations)
 - `battery_comparison_month.ipynb`: monthly comparison notebook
 - `battery_comparison_season.ipynb`: seasonal comparison notebook
 - `battery_comparison_global.ipynb`: global (full-range) comparison notebook
@@ -34,11 +35,46 @@ The project compares:
 ## Setup
 
 ```bash
+make help
 make venv
 source venv/bin/activate
 ```
 
 The Makefile also appends `ulimit -n 2048` (configurable) to `venv/bin/activate`.
+
+## Makefile commands (important)
+
+Start with:
+
+```bash
+make help
+```
+
+Main commands:
+- `make help`: show available commands and suggested workflow
+- `make venv`: create/update the virtual environment and install requirements
+- `make activate`: print the activation command
+- `make simulate_all`: run simulations for all battery configs in `config/config_*.json`
+- `make run_notebooks`: execute notebooks and export graphs
+- `make pdf_report`: generate the PDF report from exported graphs and simulation outputs
+- `make recommend`: generate an LLM recommendation markdown file from the PDF via Ollama
+
+## File structure
+
+### `config/`
+
+- `config/config_*.json`: battery-specific settings only (`battery`)
+- `config/energy_tariff.json`: shared tariff settings (`tariff`)
+
+### `out/`
+
+- `out/simulation_csv/`: simulation CSV outputs (`config_*.csv`)
+- `out/simulation_json/`: simulation JSON outputs (`config_*.json`)
+- `out/month_pictures/`: exported monthly notebook graphs
+- `out/season_pictures/`: exported seasonal notebook graphs
+- `out/global_pictures/`: exported global notebook graphs
+- `out/simulation_llm/`: recommendation markdown files (`recommendation_*.md`)
+- `out/battery_graph_report.pdf`: generated PDF report (default)
 
 ## Step-by-step procedure
 
@@ -53,11 +89,12 @@ Input:
   - `entity_id`
   - `state` (W)
   - `last_changed` (timestamp)
-- One or more config files in `config/*.json`.
+- One or more battery config files in `config/config_*.json`.
+- Global tariff file in `config/energy_tariff.json`.
 
 Generated data:
-- `out/<config-name>.csv` (minute-level simulation table)
-- `out/<config-name>.json` (global/monthly/seasonal structured results)
+- `out/simulation_csv/<config-name>.csv` (minute-level simulation table)
+- `out/simulation_json/<config-name>.json` (global/monthly/seasonal structured results)
 
 Commands:
 ```bash
@@ -73,8 +110,8 @@ make simulate_all
 ```
 
 Example output files:
-- `out/config_Zendure2400_5760kwh.csv`
-- `out/config_Zendure2400_5760kwh.json`
+- `out/simulation_csv/config_Zendure2400_5760kwh.csv`
+- `out/simulation_json/config_Zendure2400_5760kwh.json`
 
 ### b) Notebook analysis and graph export
 
@@ -83,16 +120,16 @@ Description:
 - Auto-export charts as images for reporting.
 
 Input:
-- Simulation JSON files in `out/*.json` (generated in step a).
+- Simulation JSON files in `out/simulation_json/*.json` (generated in step a).
 - Notebooks:
   - `battery_comparison_global.ipynb`
   - `battery_comparison_month.ipynb`
   - `battery_comparison_season.ipynb`
 
 Generated data:
-- `out/global/*.png` (global graphs)
-- `out/month/*.png` (monthly graphs)
-- `out/season/*.png` (seasonal graphs)
+- `out/global_pictures/*.png` (global graphs)
+- `out/month_pictures/*.png` (monthly graphs)
+- `out/season_pictures/*.png` (seasonal graphs)
 
 Commands:
 ```bash
@@ -101,8 +138,8 @@ make run_notebooks
 ```
 
 Example output files:
-- `out/month/01_monthly_net_financial_gain_vs_no_battery.png`
-- `out/season/01_seasonal_net_financial_gain_vs_no_battery.png`
+- `out/month_pictures/01_monthly_net_financial_gain_vs_no_battery.png`
+- `out/season_pictures/01_seasonal_net_financial_gain_vs_no_battery.png`
 
 Optional manual run (if you want only global):
 ```bash
@@ -111,23 +148,23 @@ MPLCONFIGDIR=/tmp/matplotlib venv/bin/python -m nbconvert \
 ```
 
 Global notebook output files:
-- `out/global/01_global_energy_reduction_kwh.png`
-- `out/global/05_global_battery_status_heatmap.png`
+- `out/global_pictures/01_global_energy_reduction_kwh.png`
+- `out/global_pictures/05_global_battery_status_heatmap.png`
 
 ### c) PDF generation
 
 Description:
 - Build a consolidated PDF report from exported graph images.
 - Include intro/methodology/scope/data-requirements sections and configuration cards.
-- If global graphs are available in `out/global`, they are included before monthly and seasonal sections.
+- If global graphs are available in `out/global_pictures`, they are included before monthly and seasonal sections.
 
 Input:
 - Graph images from step b:
-  - `out/global/*.png` (optional, included first if present)
-  - `out/month/*.png`
-  - `out/season/*.png`
+  - `out/global_pictures/*.png` (optional, included first if present)
+  - `out/month_pictures/*.png`
+  - `out/season_pictures/*.png`
 - Scenario config files:
-  - `config/*.json`
+  - `config/config_*.json`
 
 Generated data:
 - `out/battery_graph_report.pdf` (default)
@@ -145,7 +182,7 @@ Example output file:
 - `out/battery_graph_report.pdf`
 
 Note:
-- `make pdf_report` automatically includes recommendation text from `out/recommendation.md` when that file exists.
+- `make pdf_report` automatically includes recommendation text from `out/simulation_llm/recommendation_ollama.md` when that file exists.
 
 ### d) AI recommendation from PDF (local Ollama)
 
@@ -157,7 +194,7 @@ Input:
 - Local Ollama model (default: `llama3.1:70b-instruct-q4_K_M`)
 
 Generated data:
-- `out/recommendation.md` (default)
+- `out/simulation_llm/recommendation_ollama.md` (default)
 
 Setup:
 ```bash
@@ -191,7 +228,7 @@ make recommend \
   OLLAMA_TOP_P=0.9 \
   OLLAMA_NUM_CTX=32768 \
   RECOMMEND_INPUT_PDF=out/my_report.pdf \
-  RECOMMEND_OUTPUT=out/my_recommendation.md
+  RECOMMEND_OUTPUT=out/simulation_llm/recommendation_custom.md
 ```
 
 Troubleshooting (`make recommend`):
@@ -226,7 +263,7 @@ make recommend OLLAMA_MODEL=llama3.1:70b-instruct-q4_K_M OLLAMA_NUM_CTX=4096
 ```
 
 Example output file:
-- `out/recommendation.md`
+- `out/simulation_llm/recommendation_ollama.md`
 
 To embed recommendation in PDF:
 ```bash
@@ -252,7 +289,7 @@ make simulate_all run_notebooks pdf_report recommend pdf_report
 
 ## Configuration format
 
-Each JSON config contains:
+Battery scenario files (`config/config_*.json`) contain:
 - `battery`
   - `capacity_Wh_per_phase`
   - `cost_chf`
@@ -264,6 +301,8 @@ Each JSON config contains:
   - `initial_soc_percent_per_phase`
   - `soc_min_pct`
   - `soc_max_pct`
+
+Global tariff file (`config/energy_tariff.json`) contains:
 - `tariff`
   - `peak.tariff_consume`
   - `peak.tariff_inject`

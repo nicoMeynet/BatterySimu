@@ -204,24 +204,16 @@ def extract_config_payload(data: dict) -> dict:
     raise ValueError("Unsupported config schema (expected config JSON or simulation output JSON).")
 
 
-def load_configuration_rows(config_paths: list[Path]) -> list[dict]:
+def load_battery_configuration_rows(config_paths: list[Path]) -> list[dict]:
     rows = []
     for path in sorted(config_paths):
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
         cfg = extract_config_payload(raw)
-        if "tariff" not in cfg and "battery" in cfg:
-            tariff_path = path.parent / "energy_tariff.json"
-            with open(tariff_path, "r", encoding="utf-8") as f:
-                tariff_wrapper = json.load(f)
-            cfg = {**cfg, "tariff": tariff_wrapper.get("tariff", tariff_wrapper)}
 
         battery = cfg["battery"]
-        tariff = cfg["tariff"]
         capacity_per_phase = battery.get("capacity_Wh_per_phase", [0, 0, 0])
         total_kwh = sum(capacity_per_phase) / 1000 if capacity_per_phase else 0
-        peak = tariff.get("peak", {})
-        off_peak = tariff.get("off_peak", {})
 
         rows.append(
             {
@@ -246,15 +238,43 @@ def load_configuration_rows(config_paths: list[Path]) -> list[dict]:
                     ),
                     ("SOC min / max (%)", f"{battery.get('soc_min_pct', '-')} / {battery.get('soc_max_pct', '-')}"),
                     ("Max cycles", str(battery.get("max_cycles", "-"))),
-                    ("Peak tariff consume / inject", f"{peak.get('tariff_consume', '-')} / {peak.get('tariff_inject', '-')}"),
-                    (
-                        "Off-peak tariff consume / inject",
-                        f"{off_peak.get('tariff_consume', '-')} / {off_peak.get('tariff_inject', '-')}",
-                    ),
                 ],
             }
         )
     return rows
+
+
+def load_energy_tariff_configuration_rows(config_paths: list[Path]) -> list[dict]:
+    if not config_paths:
+        return []
+
+    first_path = sorted(config_paths)[0]
+    with open(first_path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    cfg = extract_config_payload(raw)
+
+    tariff = cfg.get("tariff")
+    if tariff is None:
+        tariff_path = first_path.parent / "energy_tariff.json"
+        with open(tariff_path, "r", encoding="utf-8") as f:
+            tariff_wrapper = json.load(f)
+        tariff = tariff_wrapper.get("tariff", tariff_wrapper)
+
+    peak = tariff.get("peak", {})
+    off_peak = tariff.get("off_peak", {})
+    return [
+        {
+            "scenario": "energy_tariff",
+            "fields": [
+                ("Peak consume tariff", str(peak.get("tariff_consume", "-"))),
+                ("Peak inject tariff", str(peak.get("tariff_inject", "-"))),
+                ("Peak days", "/".join(str(x) for x in peak.get("days", [])) or "-"),
+                ("Peak hours", "/".join(str(x) for x in peak.get("hours", [])) or "-"),
+                ("Off-peak consume tariff", str(off_peak.get("tariff_consume", "-"))),
+                ("Off-peak inject tariff", str(off_peak.get("tariff_inject", "-"))),
+            ],
+        }
+    ]
 
 
 def load_input_data_summary(simulation_paths: list[Path], configuration_count: int) -> dict | None:
@@ -561,6 +581,7 @@ def paginate_structured_lines(
 
 def draw_config_cards_page(
     pdf: PdfPages,
+    section_title: str,
     rows: list[dict],
     page_index: int,
     total_pages: int,
@@ -572,7 +593,7 @@ def draw_config_cards_page(
     ax.text(
         0.04,
         0.95,
-        "Configuration Used",
+        section_title,
         ha="left",
         va="top",
         fontsize=18,
@@ -860,7 +881,8 @@ def build_pdf(
     data_requirements_text: str,
     recommendation_text: str,
     input_data_summary: dict | None,
-    configuration_rows: list[dict],
+    battery_configuration_rows: list[dict],
+    energy_tariff_configuration_rows: list[dict],
     global_images: list[Path],
     monthly_images: list[Path],
     seasonal_images: list[Path],
@@ -883,7 +905,10 @@ def build_pdf(
         if recommendation_text.strip()
         else []
     )
-    config_page_count = len(list(chunked(configuration_rows, 2))) if configuration_rows else 0
+    battery_config_page_count = len(list(chunked(battery_configuration_rows, 2))) if battery_configuration_rows else 0
+    energy_tariff_page_count = (
+        len(list(chunked(energy_tariff_configuration_rows, 2))) if energy_tariff_configuration_rows else 0
+    )
     input_data_page_count = 1 if input_data_summary else 0
     section_page_counts = [len(list(chunked(images, 2))) for _, images in section_specs]
     toc_page_count = 1
@@ -895,7 +920,8 @@ def build_pdf(
         *[(section_title, count) for (section_title, _), count in zip(section_specs, section_page_counts)],
         ("Simulation Methodology", len(methodology_pages)),
         ("Data Requirements", len(data_requirements_pages)),
-        ("Configuration Used", config_page_count),
+        ("Battery Configuration Used", battery_config_page_count),
+        ("Energy Tariff Configuration Used", energy_tariff_page_count),
     ]
 
     total_pages = 1 + toc_page_count + sum(count for _, count in chapter_counts)
@@ -993,9 +1019,20 @@ def build_pdf(
             )
             page_index += 1
 
-        for config_chunk in chunked(configuration_rows, 2):
+        for config_chunk in chunked(battery_configuration_rows, 2):
             draw_config_cards_page(
                 pdf=pdf,
+                section_title="Battery Configuration Used",
+                rows=config_chunk,
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for config_chunk in chunked(energy_tariff_configuration_rows, 2):
+            draw_config_cards_page(
+                pdf=pdf,
+                section_title="Energy Tariff Configuration Used",
                 rows=config_chunk,
                 page_index=page_index,
                 total_pages=total_pages,
@@ -1081,7 +1118,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional text/markdown file containing AI recommendation to embed in the PDF "
-            "(for example out/recommendation.md)."
+            "(for example out/simulation_llm/recommendation_ollama.md)."
         ),
     )
     return parser.parse_args()
@@ -1099,7 +1136,8 @@ def main() -> None:
         if args.simulation_jsons
         else []
     )
-    configuration_rows = load_configuration_rows(config_paths) if config_paths else []
+    battery_configuration_rows = load_battery_configuration_rows(config_paths) if config_paths else []
+    energy_tariff_configuration_rows = load_energy_tariff_configuration_rows(config_paths) if config_paths else []
     input_data_summary = load_input_data_summary(simulation_paths, len(config_paths))
     recommendation_text = ""
     if args.recommendation_file:
@@ -1118,7 +1156,8 @@ def main() -> None:
         data_requirements_text=args.data_requirements,
         recommendation_text=recommendation_text,
         input_data_summary=input_data_summary,
-        configuration_rows=configuration_rows,
+        battery_configuration_rows=battery_configuration_rows,
+        energy_tariff_configuration_rows=energy_tariff_configuration_rows,
         global_images=global_images,
         monthly_images=monthly_images,
         seasonal_images=seasonal_images,

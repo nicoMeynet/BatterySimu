@@ -1532,9 +1532,12 @@ config = load_config(args.config)
 config_path = Path(args.config)
 run_id = config_path.stem      # e.g. "config_4kwh"
 output_dir = Path("out")
-output_dir.mkdir(exist_ok=True)
-csv_output_file = output_dir / f"{run_id}.csv"
-json_output_file = output_dir / f"{run_id}.json"
+simulation_csv_dir = output_dir / "simulation_csv"
+simulation_json_dir = output_dir / "simulation_json"
+simulation_csv_dir.mkdir(parents=True, exist_ok=True)
+simulation_json_dir.mkdir(parents=True, exist_ok=True)
+csv_output_file = simulation_csv_dir / f"{run_id}.csv"
+json_output_file = simulation_json_dir / f"{run_id}.json"
 
 
 # ---- Battery configuration ----
