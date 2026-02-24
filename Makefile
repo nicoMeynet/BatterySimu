@@ -55,9 +55,29 @@ DATASETS := \
 	dataset/2025/2025_history_phase_b_1dec2024-1dec2025.csv \
 	dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv
 
-CONFIGS := $(sort $(wildcard config/*.json))
+CONFIGS := $(sort $(wildcard config/config_*.json))
 
 SIMULATION_JSONS := $(patsubst config/%.json,out/%.json,$(CONFIGS))
+
+.PHONY: help
+help:
+	@echo "Available make targets:"
+	@echo "  help           Show this help message"
+	@echo "  all            Create venv and print activation command"
+	@echo "  venv           Create/update Python virtual environment and install requirements"
+	@echo "  activate       Print the command to activate the virtual environment"
+	@echo "  simulate_all   Run battery_sim.py for all config files in config/"
+	@echo "  run_notebooks  Execute comparison notebooks and refresh exported graphs"
+	@echo "  pdf_report     Build the PDF report from exported graph images + simulation outputs"
+	@echo "  recommend      Generate recommendation markdown from the PDF via Ollama"
+	@echo ""
+	@echo "Typical workflow:"
+	@echo "  make venv"
+	@echo "  source venv/bin/activate"
+	@echo "  make simulate_all"
+	@echo "  make run_notebooks"
+	@echo "  make pdf_report"
+	@echo "  make recommend"
 
 .PHONY: all
 all: venv activate

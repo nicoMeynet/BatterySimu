@@ -197,6 +197,8 @@ def normalize_power(values: list[int | float] | None) -> str:
 def extract_config_payload(data: dict) -> dict:
     if "battery" in data and "tariff" in data:
         return data
+    if "battery" in data:
+        return data
     if "configuration" in data and "battery" in data["configuration"] and "tariff" in data["configuration"]:
         return data["configuration"]
     raise ValueError("Unsupported config schema (expected config JSON or simulation output JSON).")
@@ -208,6 +210,11 @@ def load_configuration_rows(config_paths: list[Path]) -> list[dict]:
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
         cfg = extract_config_payload(raw)
+        if "tariff" not in cfg and "battery" in cfg:
+            tariff_path = path.parent / "energy_tariff.json"
+            with open(tariff_path, "r", encoding="utf-8") as f:
+                tariff_wrapper = json.load(f)
+            cfg = {**cfg, "tariff": tariff_wrapper.get("tariff", tariff_wrapper)}
 
         battery = cfg["battery"]
         tariff = cfg["tariff"]

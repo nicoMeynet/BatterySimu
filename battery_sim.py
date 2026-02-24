@@ -24,8 +24,18 @@ PHASE_KEYS = ["A", "B", "C"]
 #####################################################################
 def load_config(path: str) -> dict:
     """Load simulation configuration from a JSON file path."""
-    with open(path, "r") as f:
-        return json.load(f)
+    config_path = Path(path)
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    # Support battery-only config files by loading a shared tariff file.
+    if "tariff" not in config:
+        tariff_path = config_path.parent / "energy_tariff.json"
+        with open(tariff_path, "r", encoding="utf-8") as f:
+            tariff_wrapper = json.load(f)
+        config["tariff"] = tariff_wrapper.get("tariff", tariff_wrapper)
+
+    return config
 
 ###################################################################
 # FUNCTIONS

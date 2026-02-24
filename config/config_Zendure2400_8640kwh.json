@@ -1,26 +1,30 @@
 {
   "battery": {
-    "capacity_Wh_per_phase": [8640, 8640, 8640],
+    "capacity_Wh_per_phase": [
+      8640,
+      8640,
+      8640
+    ],
     "cost_chf": 6471,
-    "max_charge_power_watts": [2400, 2400, 2400],
-    "max_discharge_power_watts": [2400, 2400, 2400],
+    "max_charge_power_watts": [
+      2400,
+      2400,
+      2400
+    ],
+    "max_discharge_power_watts": [
+      2400,
+      2400,
+      2400
+    ],
     "charge_efficiency": 0.9,
     "discharge_efficiency": 0.9,
     "max_cycles": 6000,
-    "initial_soc_percent_per_phase": [100, 100, 100],
+    "initial_soc_percent_per_phase": [
+      100,
+      100,
+      100
+    ],
     "soc_min_pct": 10,
     "soc_max_pct": 100
-  },
-  "tariff": {
-    "peak": {
-      "tariff_consume": 0.34,
-      "tariff_inject": 0.06,
-      "days": [0, 1, 2, 3, 4],
-      "hours": [17, 18, 19, 20, 21]
-    },
-    "off_peak": {
-      "tariff_consume": 0.34,
-      "tariff_inject": 0.06
-    }
   }
 }

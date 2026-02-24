@@ -1,0 +1,26 @@
+{
+  "tariff": {
+    "peak": {
+      "tariff_consume": 0.34,
+      "tariff_inject": 0.06,
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hours": [
+        17,
+        18,
+        19,
+        20,
+        21
+      ]
+    },
+    "off_peak": {
+      "tariff_consume": 0.34,
+      "tariff_inject": 0.06
+    }
+  }
+}
