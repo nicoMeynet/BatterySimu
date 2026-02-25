@@ -880,6 +880,7 @@ def build_pdf(
     scope_text: str,
     data_requirements_text: str,
     recommendation_text: str,
+    license_text: str,
     input_data_summary: dict | None,
     battery_configuration_rows: list[dict],
     energy_tariff_configuration_rows: list[dict],
@@ -905,6 +906,11 @@ def build_pdf(
         if recommendation_text.strip()
         else []
     )
+    license_pages = (
+        paginate_structured_lines(parse_structured_text(license_text))
+        if license_text.strip()
+        else []
+    )
     battery_config_page_count = len(list(chunked(battery_configuration_rows, 2))) if battery_configuration_rows else 0
     energy_tariff_page_count = (
         len(list(chunked(energy_tariff_configuration_rows, 2))) if energy_tariff_configuration_rows else 0
@@ -922,6 +928,7 @@ def build_pdf(
         ("Data Requirements", len(data_requirements_pages)),
         ("Battery Configuration Used", battery_config_page_count),
         ("Energy Tariff Configuration Used", energy_tariff_page_count),
+        ("License", len(license_pages)),
     ]
 
     total_pages = 1 + toc_page_count + sum(count for _, count in chapter_counts)
@@ -1039,6 +1046,17 @@ def build_pdf(
             )
             page_index += 1
 
+        for i, page_lines in enumerate(license_pages):
+            draw_structured_text_page(
+                pdf=pdf,
+                title="License",
+                page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -1121,6 +1139,14 @@ def parse_args() -> argparse.Namespace:
             "(for example out/simulation_llm_recommendation/recommendation_ollama.md)."
         ),
     )
+    parser.add_argument(
+        "--license-file",
+        default="LICENSE",
+        help=(
+            "Optional text file containing the project license to embed in the PDF "
+            "(default: LICENSE)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1150,6 +1176,17 @@ def main() -> None:
                 print(f"AI recommendation file is empty, skipping: {rec_path}")
         else:
             print(f"AI recommendation file not found, skipping: {rec_path}")
+    license_text = ""
+    if args.license_file:
+        license_path = Path(args.license_file)
+        if license_path.exists() and license_path.is_file():
+            license_text = license_path.read_text(encoding="utf-8").strip()
+            if license_text:
+                print(f"Loaded license text: {license_path}")
+            else:
+                print(f"License file is empty, skipping: {license_path}")
+        else:
+            print(f"License file not found, skipping: {license_path}")
     output_pdf = Path(args.output)
 
     build_pdf(
@@ -1161,6 +1198,7 @@ def main() -> None:
         scope_text=args.scope,
         data_requirements_text=args.data_requirements,
         recommendation_text=recommendation_text,
+        license_text=license_text,
         input_data_summary=input_data_summary,
         battery_configuration_rows=battery_configuration_rows,
         energy_tariff_configuration_rows=energy_tariff_configuration_rows,
