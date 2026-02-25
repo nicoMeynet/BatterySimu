@@ -511,6 +511,10 @@ def build_canonical_results(
         "energy": energy_rent["energy"],
         "rentability": {
             "total_gain_chf": energy_rent["rentability"]["total_gain_chf"],
+            "bill_without_battery_chf": energy_rent["rentability"]["bill_without_battery_chf"],
+            "bill_with_battery_chf": energy_rent["rentability"]["bill_with_battery_chf"],
+            "bill_reduction_chf": energy_rent["rentability"]["bill_reduction_chf"],
+            "bill_reduction_pct_vs_no_battery": energy_rent["rentability"]["bill_reduction_pct_vs_no_battery"],
             "annualized_gain_chf": annualized_gain if is_global else None,
             "annualization_method": "linear_extrapolation" if is_global else None,
             "amortization_years": amortization_years if is_global else None,
@@ -574,6 +578,8 @@ def compute_energy_and_rentability_from_df(df):
     injected_table = []
     consumed_table = []
     total_gain_chf = 0.0
+    total_bill_without_chf = 0.0
+    total_bill_with_chf = 0.0
 
     for phase in PHASE_KEYS:
         for tarif in ["HC", "HP"]:
@@ -582,6 +588,15 @@ def compute_energy_and_rentability_from_df(df):
 
             inject_price = get_current_tariff_price(tarif, "inject")
             consume_price = get_current_tariff_price(tarif, "consume")
+
+            # Absolute billing components (costs positive, export revenue subtracted from bill).
+            inj_without_chf = inject_price * (injected_without[phase][tarif] / 1000.0)
+            inj_with_chf = inject_price * (injected_with[phase][tarif] / 1000.0)
+            con_without_chf = consume_price * (consumed_without[phase][tarif] / 1000.0)
+            con_with_chf = consume_price * (consumed_with[phase][tarif] / 1000.0)
+
+            total_bill_without_chf += con_without_chf - inj_without_chf
+            total_bill_with_chf += con_with_chf - inj_with_chf
 
             # Signed CHF impacts
             inj_chf_signed = inject_price * inj_delta_kwh          # if inject less => negative (lost revenue)
@@ -610,6 +625,13 @@ def compute_energy_and_rentability_from_df(df):
                 "financial_effect": financial_effect(con_delta_kwh, "consumed")
             })
 
+    bill_reduction_chf = total_bill_without_chf - total_bill_with_chf
+    bill_reduction_pct = (
+        (bill_reduction_chf / total_bill_without_chf) * 100.0
+        if total_bill_without_chf > 0
+        else None
+    )
+
     return {
         "energy": {
             "conventions": {
@@ -622,6 +644,10 @@ def compute_energy_and_rentability_from_df(df):
         },
         "rentability": {
             "total_gain_chf": round_value(total_gain_chf),
+            "bill_without_battery_chf": round_value(total_bill_without_chf),
+            "bill_with_battery_chf": round_value(total_bill_with_chf),
+            "bill_reduction_chf": round_value(bill_reduction_chf),
+            "bill_reduction_pct_vs_no_battery": round_value(bill_reduction_pct) if bill_reduction_pct is not None else None,
             "annualization_method": None,
             "annualized_gain_chf": None,
             "amortization_years": None,
