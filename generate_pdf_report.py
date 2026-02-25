@@ -1118,7 +1118,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional text/markdown file containing AI recommendation to embed in the PDF "
-            "(for example out/simulation_llm/recommendation_ollama.md)."
+            "(for example out/simulation_llm_recommendation/recommendation_ollama.md)."
         ),
     )
     return parser.parse_args()
@@ -1144,6 +1144,12 @@ def main() -> None:
         rec_path = Path(args.recommendation_file)
         if rec_path.exists() and rec_path.is_file():
             recommendation_text = rec_path.read_text(encoding="utf-8").strip()
+            if recommendation_text:
+                print(f"Loaded AI recommendation: {rec_path}")
+            else:
+                print(f"AI recommendation file is empty, skipping: {rec_path}")
+        else:
+            print(f"AI recommendation file not found, skipping: {rec_path}")
     output_pdf = Path(args.output)
 
     build_pdf(

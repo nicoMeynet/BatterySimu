@@ -5,9 +5,9 @@ PYTHON := $(shell command -v /opt/homebrew/bin/python3.12 || command -v python3)
 VENV_DIR := venv
 REQ_FILE := requirements.txt
 ULIMIT_VALUE ?= 2048
-MONTHLY_GRAPHS_DIR ?= out/month_pictures
-SEASONAL_GRAPHS_DIR ?= out/season_pictures
-GLOBAL_GRAPHS_DIR ?= out/global_pictures
+MONTHLY_GRAPHS_DIR ?= out/month_images
+SEASONAL_GRAPHS_DIR ?= out/season_images
+GLOBAL_GRAPHS_DIR ?= out/global_images
 PDF_REPORT_OUTPUT ?= out/battery_graph_report.pdf
 PDF_REPORT_TITLE ?= Battery Simulation Graph Report
 PDF_REPORT_SUBTITLE ?= Monthly and seasonal comparison charts
@@ -18,7 +18,7 @@ GLOBAL_NOTEBOOK ?= battery_comparison_global.ipynb
 NOTEBOOK_TIMEOUT ?= -1
 NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
 RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
-RECOMMEND_OUTPUT ?= out/simulation_llm/recommendation_ollama.md
+RECOMMEND_OUTPUT ?= out/simulation_llm_recommendation/recommendation_ollama.md
 # Ollama model selection (uncomment one if you want to switch default)
 # Recommended for MacBook Pro 48GB RAM: good quality/speed/stability balance
 # OLLAMA_MODEL ?= qwen3:14b
@@ -48,7 +48,7 @@ OLLAMA_MODEL ?= gemma3:12b
 OLLAMA_TEMPERATURE ?= 0.2
 OLLAMA_TOP_P ?= 0.9
 OLLAMA_NUM_CTX ?= 8192
-RECOMMENDATION_FILE ?= out/simulation_llm/recommendation_ollama.md
+RECOMMENDATION_FILE ?= out/simulation_llm_recommendation/recommendation_ollama.md
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -171,16 +171,21 @@ pdf_report:
 		echo "No monthly images found in $(MONTHLY_GRAPHS_DIR)"; \
 		exit 1; \
 	fi; \
+	monthly_count=$$(printf '%s\n' "$$monthly_files" | wc -l | tr -d ' '); \
+	echo "Including $$monthly_count monthly images from $(MONTHLY_GRAPHS_DIR)"; \
 	seasonal_files=$$(find "$(SEASONAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) | sort); \
 	if [ -z "$$seasonal_files" ]; then \
 		echo "No seasonal images found in $(SEASONAL_GRAPHS_DIR)"; \
 		exit 1; \
 	fi; \
+	seasonal_count=$$(printf '%s\n' "$$seasonal_files" | wc -l | tr -d ' '); \
+	echo "Including $$seasonal_count seasonal images from $(SEASONAL_GRAPHS_DIR)"; \
 	global_args=""; \
 	if [ -d "$(GLOBAL_GRAPHS_DIR)" ]; then \
 		global_files=$$(find "$(GLOBAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) | sort); \
 		if [ -n "$$global_files" ]; then \
-			echo "Including global images from $(GLOBAL_GRAPHS_DIR)"; \
+			global_count=$$(printf '%s\n' "$$global_files" | wc -l | tr -d ' '); \
+			echo "Including $$global_count global images from $(GLOBAL_GRAPHS_DIR)"; \
 			global_args="--global $$global_files"; \
 		else \
 			echo "No global images found in $(GLOBAL_GRAPHS_DIR); continuing without global section."; \
@@ -188,11 +193,22 @@ pdf_report:
 	else \
 		echo "Global graphs directory does not exist: $(GLOBAL_GRAPHS_DIR) (continuing without global section)."; \
 	fi; \
+	recommendation_file_arg=""; \
+	if [ -f "$(RECOMMENDATION_FILE)" ]; then \
+		if grep -q '[^[:space:]]' "$(RECOMMENDATION_FILE)"; then \
+			echo "Including AI recommendation from $(RECOMMENDATION_FILE)"; \
+			recommendation_file_arg="$(RECOMMENDATION_FILE)"; \
+		else \
+			echo "AI recommendation file is empty: $(RECOMMENDATION_FILE) (continuing without recommendation section)."; \
+		fi; \
+	else \
+		echo "AI recommendation file not found: $(RECOMMENDATION_FILE) (continuing without recommendation section)."; \
+	fi; \
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
 		$$global_args \
+		$${recommendation_file_arg:+--recommendation-file "$$recommendation_file_arg"} \
 		--configs $(CONFIGS) \
 		--simulation-jsons $(SIMULATION_JSONS) \
-		--recommendation-file "$(RECOMMENDATION_FILE)" \
 		--monthly $$monthly_files \
 		--seasonal $$seasonal_files \
 		--output "$(PDF_REPORT_OUTPUT)" \

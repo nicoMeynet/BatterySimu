@@ -70,10 +70,10 @@ Main commands:
 
 - `out/simulation_csv/`: simulation CSV outputs (`config_*.csv`)
 - `out/simulation_json/`: simulation JSON outputs (`config_*.json`)
-- `out/month_pictures/`: exported monthly notebook graphs
-- `out/season_pictures/`: exported seasonal notebook graphs
-- `out/global_pictures/`: exported global notebook graphs
-- `out/simulation_llm/`: recommendation markdown files (`recommendation_*.md`)
+- `out/month_images/`: exported monthly notebook graphs
+- `out/season_images/`: exported seasonal notebook graphs
+- `out/global_images/`: exported global notebook graphs
+- `out/simulation_llm_recommendation/`: recommendation markdown files (`recommendation_*.md`)
 - `out/battery_graph_report.pdf`: generated PDF report (default)
 
 ## Step-by-step procedure
@@ -127,9 +127,9 @@ Input:
   - `battery_comparison_season.ipynb`
 
 Generated data:
-- `out/global_pictures/*.png` (global graphs)
-- `out/month_pictures/*.png` (monthly graphs)
-- `out/season_pictures/*.png` (seasonal graphs)
+- `out/global_images/*.png` (global graphs)
+- `out/month_images/*.png` (monthly graphs)
+- `out/season_images/*.png` (seasonal graphs)
 
 Commands:
 ```bash
@@ -138,8 +138,8 @@ make run_notebooks
 ```
 
 Example output files:
-- `out/month_pictures/01_monthly_net_financial_gain_vs_no_battery.png`
-- `out/season_pictures/01_seasonal_net_financial_gain_vs_no_battery.png`
+- `out/month_images/01_monthly_net_financial_gain_vs_no_battery.png`
+- `out/season_images/01_seasonal_net_financial_gain_vs_no_battery.png`
 
 Optional manual run (if you want only global):
 ```bash
@@ -148,21 +148,21 @@ MPLCONFIGDIR=/tmp/matplotlib venv/bin/python -m nbconvert \
 ```
 
 Global notebook output files:
-- `out/global_pictures/01_global_energy_reduction_kwh.png`
-- `out/global_pictures/05_global_battery_status_heatmap.png`
+- `out/global_images/01_global_energy_reduction_kwh.png`
+- `out/global_images/05_global_battery_status_heatmap.png`
 
 ### c) PDF generation
 
 Description:
 - Build a consolidated PDF report from exported graph images.
 - Include intro/methodology/scope/data-requirements sections and configuration cards.
-- If global graphs are available in `out/global_pictures`, they are included before monthly and seasonal sections.
+- If global graphs are available in `out/global_images`, they are included before monthly and seasonal sections.
 
 Input:
 - Graph images from step b:
-  - `out/global_pictures/*.png` (optional, included first if present)
-  - `out/month_pictures/*.png`
-  - `out/season_pictures/*.png`
+  - `out/global_images/*.png` (optional, included first if present)
+  - `out/month_images/*.png`
+  - `out/season_images/*.png`
 - Scenario config files:
   - `config/config_*.json`
 
@@ -182,7 +182,7 @@ Example output file:
 - `out/battery_graph_report.pdf`
 
 Note:
-- `make pdf_report` automatically includes recommendation text from `out/simulation_llm/recommendation_ollama.md` when that file exists.
+- `make pdf_report` automatically includes recommendation text from `out/simulation_llm_recommendation/recommendation_ollama.md` when that file exists.
 
 ### d) AI recommendation from PDF (local Ollama)
 
@@ -194,7 +194,7 @@ Input:
 - Local Ollama model (default: `llama3.1:70b-instruct-q4_K_M`)
 
 Generated data:
-- `out/simulation_llm/recommendation_ollama.md` (default)
+- `out/simulation_llm_recommendation/recommendation_ollama.md` (default)
 
 Setup:
 ```bash
@@ -228,7 +228,7 @@ make recommend \
   OLLAMA_TOP_P=0.9 \
   OLLAMA_NUM_CTX=32768 \
   RECOMMEND_INPUT_PDF=out/my_report.pdf \
-  RECOMMEND_OUTPUT=out/simulation_llm/recommendation_custom.md
+  RECOMMEND_OUTPUT=out/simulation_llm_recommendation/recommendation_custom.md
 ```
 
 Troubleshooting (`make recommend`):
@@ -263,7 +263,7 @@ make recommend OLLAMA_MODEL=llama3.1:70b-instruct-q4_K_M OLLAMA_NUM_CTX=4096
 ```
 
 Example output file:
-- `out/simulation_llm/recommendation_ollama.md`
+- `out/simulation_llm_recommendation/recommendation_ollama.md`
 
 To embed recommendation in PDF:
 ```bash
