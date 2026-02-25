@@ -49,6 +49,9 @@ OLLAMA_TEMPERATURE ?= 0.2
 OLLAMA_TOP_P ?= 0.9
 OLLAMA_NUM_CTX ?= 8192
 RECOMMENDATION_FILE ?= out/simulation_llm_recommendation/recommendation_ollama.md
+KPI_SUMMARY_JSON ?= out/kpi_summary/kpi_summary.json
+KPI_SUMMARY_MD ?= out/kpi_summary/kpi_summary.md
+KPI_MARGINAL_GAIN_THRESHOLD ?= 20
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -67,6 +70,7 @@ help:
 	@echo "  venv           Create/update Python virtual environment and install requirements"
 	@echo "  activate       Print the command to activate the virtual environment"
 	@echo "  simulate_all   Run battery_sim.py for all config files in config/"
+	@echo "  kpi_summary    Compute deterministic KPI rankings from simulation JSON outputs"
 	@echo "  run_notebooks  Execute comparison notebooks and refresh exported graphs"
 	@echo "  pdf_report     Build the PDF report from exported graph images + simulation outputs"
 	@echo "  recommend      Generate recommendation markdown from the PDF via Ollama"
@@ -75,6 +79,7 @@ help:
 	@echo "  make venv"
 	@echo "  source venv/bin/activate"
 	@echo "  make simulate_all"
+	@echo "  make kpi_summary"
 	@echo "  make run_notebooks"
 	@echo "  make pdf_report"
 	@echo "  make recommend"
@@ -115,6 +120,15 @@ simulate_all:
 		echo "Running with $$cfg"; \
 		$(VENV_DIR)/bin/python battery_sim.py $(DATASETS) --config $$cfg; \
 	done
+
+.PHONY: kpi_summary
+kpi_summary:
+	@echo "Computing KPI summary from simulation outputs..."
+	@$(VENV_DIR)/bin/python compute_kpi_summary.py \
+		--simulation-jsons $(SIMULATION_JSONS) \
+		--output-json "$(KPI_SUMMARY_JSON)" \
+		--output-markdown "$(KPI_SUMMARY_MD)" \
+		--marginal-gain-threshold "$(KPI_MARGINAL_GAIN_THRESHOLD)"
 
 .PHONY: run_notebooks
 run_notebooks:
