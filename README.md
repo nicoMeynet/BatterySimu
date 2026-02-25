@@ -18,8 +18,9 @@ The project compares:
 - `battery_comparison_month.ipynb`: monthly comparison notebook
 - `battery_comparison_season.ipynb`: seasonal comparison notebook
 - `battery_comparison_global.ipynb`: global (full-range) comparison notebook
-- `generate_pdf_report.py`: builds a PDF report from exported monthly/seasonal notebook graphs
-- `generate_recommendation.py`: generates a recommendation from the PDF report via local Ollama
+- `compute_kpi_summary.py`: computes deterministic KPI rankings from simulation JSON outputs
+- `generate_pdf_report.py`: builds a PDF report from exported global/seasonal/monthly notebook graphs
+- `generate_recommendation.py`: generates a recommendation from KPI summary and/or PDF report via local Ollama
 - `Makefile`: setup and batch run shortcuts
 
 ## Requirements
@@ -55,9 +56,10 @@ Main commands:
 - `make venv`: create/update the virtual environment and install requirements
 - `make activate`: print the activation command
 - `make simulate_all`: run simulations for all battery configs in `config/config_*.json`
+- `make kpi_summary`: compute deterministic KPI rankings (JSON + Markdown) from `out/simulation_json/*.json`
 - `make run_notebooks`: execute notebooks and export graphs
 - `make pdf_report`: generate the PDF report from exported graphs and simulation outputs
-- `make recommend`: generate an LLM recommendation markdown file from the PDF via Ollama
+- `make recommend`: generate an LLM recommendation markdown file from KPI summary and/or PDF via Ollama
 
 ## File structure
 
@@ -70,6 +72,7 @@ Main commands:
 
 - `out/simulation_csv/`: simulation CSV outputs (`config_*.csv`)
 - `out/simulation_json/`: simulation JSON outputs (`config_*.json`)
+- `out/kpi_summary/`: KPI ranking outputs for decision support (`kpi_summary.json`, `kpi_summary.md`)
 - `out/month_images/`: exported monthly notebook graphs
 - `out/season_images/`: exported seasonal notebook graphs
 - `out/global_images/`: exported global notebook graphs
@@ -77,6 +80,13 @@ Main commands:
 - `out/battery_graph_report.pdf`: generated PDF report (default)
 
 ## Step-by-step procedure
+
+Recommended KPI-first workflow order:
+1. `Simulation`
+2. `KPI summary`
+3. `AI recommendation` (KPI summary is enough; PDF optional)
+4. `Notebook analysis and graph export`
+5. `PDF generation`
 
 ### a) Simulation
 
@@ -113,7 +123,30 @@ Example output files:
 - `out/simulation_csv/config_Zendure2400_5760kwh.csv`
 - `out/simulation_json/config_Zendure2400_5760kwh.json`
 
-### b) Notebook analysis and graph export
+### b) KPI summary (deterministic battery sizing ranking)
+
+Description:
+- Compute deterministic KPI rankings from simulation JSON outputs.
+- Produce profile-based winners (for example: `balanced`, `roi_first`, `autonomy_first`, `winter_robustness`).
+- Detect a knee point (diminishing returns) and generate LLM-friendly structured summary files.
+
+Input:
+- Simulation JSON files in `out/simulation_json/*.json` (generated in step a).
+
+Generated data:
+- `out/kpi_summary/kpi_summary.json` (machine/LLM-friendly structured ranking summary)
+- `out/kpi_summary/kpi_summary.md` (human-readable KPI summary)
+
+Commands:
+```bash
+make kpi_summary
+```
+
+Example output files:
+- `out/kpi_summary/kpi_summary.json`
+- `out/kpi_summary/kpi_summary.md`
+
+### c) Notebook analysis and graph export
 
 Description:
 - Execute global, monthly, and seasonal notebooks on simulation JSON outputs.
@@ -151,18 +184,19 @@ Global notebook output files:
 - `out/global_images/01_global_energy_reduction_kwh.png`
 - `out/global_images/05_global_battery_status_heatmap.png`
 
-### c) PDF generation
+### d) PDF generation
 
 Description:
 - Build a consolidated PDF report from exported graph images.
 - Include intro/methodology/scope/data-requirements sections and configuration cards.
-- If global graphs are available in `out/global_images`, they are included before monthly and seasonal sections.
+- Include the project `LICENSE` text as a dedicated section when `LICENSE` is present.
+- Graph section order is: global, seasonal, monthly.
 
 Input:
-- Graph images from step b:
+- Graph images from step c:
   - `out/global_images/*.png` (optional, included first if present)
-  - `out/month_images/*.png`
   - `out/season_images/*.png`
+  - `out/month_images/*.png`
 - Scenario config files:
   - `config/config_*.json`
 
@@ -183,15 +217,21 @@ Example output file:
 
 Note:
 - `make pdf_report` automatically includes recommendation text from `out/simulation_llm_recommendation/recommendation_ollama.md` when that file exists.
+- `make pdf_report` automatically includes the `LICENSE` file as a PDF section when that file exists.
 
-### d) AI recommendation from PDF (local Ollama)
+### e) AI recommendation from KPI summary and/or PDF (local Ollama)
 
 Description:
-- Use a local LLM via Ollama to read the generated PDF report and produce a battery configuration recommendation.
+- Use a local LLM via Ollama to produce a battery configuration recommendation.
+- `make recommend` automatically injects KPI summary context (JSON + Markdown) when available.
+- PDF context is optional (recommended if already generated, but no longer required).
 
 Input:
-- PDF report from step c (default: `out/battery_graph_report.pdf`)
-- Local Ollama model (default: `llama3.1:70b-instruct-q4_K_M`)
+- KPI summary files from step b (auto-detected when present):
+  - `out/kpi_summary/kpi_summary.json`
+  - `out/kpi_summary/kpi_summary.md`
+- PDF report from step d (optional, default path: `out/battery_graph_report.pdf`)
+- Local Ollama model (Makefile default is `gemma3:12b`)
 
 Generated data:
 - `out/simulation_llm_recommendation/recommendation_ollama.md` (default)
@@ -212,14 +252,16 @@ ollama serve
 
 In another terminal, prepare/check model:
 ```bash
-ollama pull llama3.1:70b-instruct-q4_K_M
+ollama pull gemma3:12b
 ollama list
 ```
 
 Commands:
 ```bash
-# Default recommendation flow
+# Default recommendation flow (KPI summary is auto-included if present)
 make recommend
+
+# You can run this before notebooks/PDF if `make kpi_summary` has already been run.
 
 # Optional custom model/input/output
 make recommend \
@@ -275,16 +317,16 @@ make pdf_report
 
 ```bash
 make simulate_all
-make run_notebooks
-make pdf_report
+make kpi_summary
 make recommend
+make run_notebooks
 make pdf_report
 ```
 
 Or:
 
 ```bash
-make simulate_all run_notebooks pdf_report recommend pdf_report
+make simulate_all kpi_summary recommend run_notebooks pdf_report
 ```
 
 ## Configuration format

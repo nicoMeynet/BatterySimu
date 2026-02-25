@@ -580,7 +580,7 @@ def compute_best_by_metric(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
-def compute_best_by_season_gain(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+def compute_highest_seasonal_gain_absolute(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     pool = [c for c in candidates if not c["is_baseline"]]
     for season in SEASON_ORDER:
@@ -598,6 +598,139 @@ def compute_best_by_season_gain(candidates: list[dict[str, Any]]) -> dict[str, A
                 "battery_size_kwh": best[0]["battery_size_kwh"],
                 "season_total_gain_chf": round_or_none(best[1]),
             }
+    return out
+
+
+def compute_seasonal_smallest_good_enough(
+    candidates: list[dict[str, Any]],
+    *,
+    gain_fraction_of_max: float = 0.90,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    pool = sorted([c for c in candidates if not c["is_baseline"]], key=lambda c: (c["battery_size_kwh"], c["scenario"]))
+    for season in SEASON_ORDER:
+        values: list[tuple[dict[str, Any], float]] = []
+        for cand in pool:
+            season_blob = cand.get("seasonal_by_season", {}).get(season, {})
+            v = safe_float(season_blob.get("total_gain_chf"))
+            if v is None:
+                continue
+            values.append((cand, v))
+        if not values:
+            continue
+
+        max_gain = max(v for _, v in values)
+        target_gain = max_gain * gain_fraction_of_max
+        eligible = [(cand, v) for cand, v in values if v >= target_gain]
+        winner_cand, winner_val = min(eligible, key=lambda item: (item[0]["battery_size_kwh"], item[0]["scenario"]))
+
+        out[season] = {
+            "scenario": winner_cand["scenario"],
+            "battery_size_kwh": winner_cand["battery_size_kwh"],
+            "season_total_gain_chf": round_or_none(winner_val),
+            "max_season_gain_chf": round_or_none(max_gain),
+            "target_fraction_of_max_gain": round_or_none(gain_fraction_of_max, 3),
+            "target_gain_chf": round_or_none(target_gain),
+            "reason": (
+                f"Smallest battery size reaching at least {round(gain_fraction_of_max * 100)}% "
+                "of the maximum seasonal net financial gain."
+            ),
+        }
+    return out
+
+
+def compute_seasonal_knee_points(
+    candidates: list[dict[str, Any]],
+    marginal_gain_threshold: float,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    ordered_candidates = sorted(candidates, key=lambda c: (c["battery_size_kwh"], c["scenario"]))
+    for season in SEASON_ORDER:
+        rows: list[tuple[dict[str, Any], float]] = []
+        for cand in ordered_candidates:
+            season_blob = cand.get("seasonal_by_season", {}).get(season, {})
+            v = safe_float(season_blob.get("total_gain_chf"))
+            if v is None:
+                continue
+            rows.append((cand, v))
+
+        nonbaseline_rows = [row for row in rows if not row[0].get("is_baseline")]
+        if not nonbaseline_rows:
+            continue
+
+        if len(nonbaseline_rows) == 1:
+            only_cand, _only_gain = nonbaseline_rows[0]
+            out[season] = {
+                "scenario": only_cand["scenario"],
+                "battery_size_kwh": only_cand["battery_size_kwh"],
+                "reason": "Only one non-baseline battery configuration available for this season.",
+                "marginal_gain_threshold_chf_per_added_kwh": marginal_gain_threshold,
+                "trigger_pair": None,
+            }
+            continue
+
+        previous: tuple[dict[str, Any], float] | None = None
+        selected: dict[str, Any] | None = None
+        for cand, gain in rows:
+            if previous is None:
+                previous = (cand, gain)
+                continue
+            if cand.get("is_baseline"):
+                previous = (cand, gain)
+                continue
+
+            prev_cand, prev_gain = previous
+            delta_size = float(cand["battery_size_kwh"]) - float(prev_cand["battery_size_kwh"])
+            if delta_size <= 0:
+                previous = (cand, gain)
+                continue
+
+            marginal = (gain - prev_gain) / delta_size
+            if marginal < marginal_gain_threshold:
+                if prev_cand.get("is_baseline"):
+                    selected = {
+                        "scenario": cand["scenario"],
+                        "battery_size_kwh": cand["battery_size_kwh"],
+                        "reason": (
+                            "First non-baseline step already falls below marginal gain threshold; "
+                            "selected the smallest analyzed battery for this season."
+                        ),
+                        "marginal_gain_threshold_chf_per_added_kwh": marginal_gain_threshold,
+                        "trigger_pair": {
+                            "from_scenario": prev_cand["scenario"],
+                            "to_scenario": cand["scenario"],
+                            "to_battery_size_kwh": cand["battery_size_kwh"],
+                            "marginal_season_gain_chf_per_added_kwh": round_or_none(marginal),
+                        },
+                    }
+                    break
+                selected = {
+                    "scenario": prev_cand["scenario"],
+                    "battery_size_kwh": prev_cand["battery_size_kwh"],
+                    "reason": (
+                        "First size before marginal seasonal net gain per added kWh drops below threshold."
+                    ),
+                    "marginal_gain_threshold_chf_per_added_kwh": marginal_gain_threshold,
+                    "trigger_pair": {
+                        "from_scenario": prev_cand["scenario"],
+                        "to_scenario": cand["scenario"],
+                        "to_battery_size_kwh": cand["battery_size_kwh"],
+                        "marginal_season_gain_chf_per_added_kwh": round_or_none(marginal),
+                    },
+                }
+                break
+            previous = (cand, gain)
+
+        if selected is None:
+            largest_cand, _largest_gain = max(nonbaseline_rows, key=lambda item: item[0]["battery_size_kwh"])
+            selected = {
+                "scenario": largest_cand["scenario"],
+                "battery_size_kwh": largest_cand["battery_size_kwh"],
+                "reason": "Marginal seasonal net gain per added kWh never dropped below threshold.",
+                "marginal_gain_threshold_chf_per_added_kwh": marginal_gain_threshold,
+                "trigger_pair": None,
+            }
+        out[season] = selected
     return out
 
 
@@ -661,17 +794,57 @@ def render_markdown(summary: dict[str, Any]) -> str:
         )
     lines.append("")
 
-    season_winners = summary.get("best_by_season_total_gain", {})
-    if season_winners:
-        lines.append("## Best Battery Size by Season (Net Financial Gain)")
+    seasonal_smallest_good_enough = summary.get("seasonal_smallest_good_enough", {})
+    if seasonal_smallest_good_enough:
+        lines.append("## Seasonal Smallest Good-Enough Battery Size")
         lines.append("")
         for season in SEASON_ORDER:
-            item = season_winners.get(season)
+            item = seasonal_smallest_good_enough.get(season)
             if not item:
                 continue
             lines.append(
                 f"- `{season}`: `{item['battery_size_kwh']} kWh` (`{item['scenario']}`) "
-                f"with `{item['season_total_gain_chf']} CHF`"
+                f"with `{item['season_total_gain_chf']} CHF` "
+                f"(target `{item['target_gain_chf']} CHF` = {int(round(float(item['target_fraction_of_max_gain']) * 100))}% of max `{item['max_season_gain_chf']} CHF`)"
+            )
+        lines.append("")
+
+    seasonal_knees = summary.get("seasonal_knee_points", {})
+    if seasonal_knees:
+        lines.append("## Seasonal Knee Points (Diminishing Returns)")
+        lines.append("")
+        for season in SEASON_ORDER:
+            item = seasonal_knees.get(season)
+            if not item:
+                continue
+            lines.append(
+                f"- `{season}`: `{item['battery_size_kwh']} kWh` (`{item['scenario']}`) "
+                f"threshold `{item['marginal_gain_threshold_chf_per_added_kwh']} CHF per added kWh`"
+            )
+            trigger = item.get("trigger_pair")
+            if trigger:
+                lines.append(
+                    "  Trigger: "
+                    f"`{trigger.get('from_scenario')}` -> `{trigger.get('to_scenario')}` "
+                    f"(marginal `{trigger.get('marginal_season_gain_chf_per_added_kwh')} CHF per added kWh`)"
+                )
+        lines.append("")
+
+    seasonal_absolute_max = summary.get("highest_seasonal_gain_absolute", {})
+    if seasonal_absolute_max:
+        lines.append("## Highest Seasonal Net Gain (Absolute, Not a Sizing KPI)")
+        lines.append("")
+        lines.append(
+            "- This section is kept for reference only. It often favors the largest battery size because it uses absolute seasonal CHF gain."
+        )
+        lines.append("")
+        for season in SEASON_ORDER:
+            item = seasonal_absolute_max.get(season)
+            if not item:
+                continue
+            lines.append(
+                f"- `{season}`: `{item['battery_size_kwh']} kWh` (`{item['scenario']}`) "
+                f"with absolute seasonal max `{item['season_total_gain_chf']} CHF`"
             )
         lines.append("")
 
@@ -702,6 +875,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     lines.append("- Prefer the `balanced` winner as the default recommendation candidate unless explicit user priorities differ.")
     lines.append("- Use `roi_first`, `autonomy_first`, and `winter_robustness` winners as alternatives with clear tradeoffs.")
     lines.append("- Use the knee point as the practical sizing reference to justify avoiding oversizing.")
+    lines.append("- Prefer `seasonal_smallest_good_enough` over absolute seasonal max-gain when discussing seasonal sizing.")
     lines.append("- When bill reduction exceeds 100%, interpret it as bill elimination plus net credit.")
     lines.append("")
     return "\n".join(lines).strip() + "\n"
@@ -753,7 +927,9 @@ def main() -> None:
 
     baseline = next((c for c in candidates if c.get("is_baseline")), None)
     best_by_metric = compute_best_by_metric(candidates)
-    best_by_season_total_gain = compute_best_by_season_gain(candidates)
+    highest_seasonal_gain_absolute = compute_highest_seasonal_gain_absolute(candidates)
+    seasonal_smallest_good_enough = compute_seasonal_smallest_good_enough(candidates, gain_fraction_of_max=0.90)
+    seasonal_knee_points = compute_seasonal_knee_points(candidates, args.marginal_gain_threshold)
 
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -769,7 +945,9 @@ def main() -> None:
         },
         "knee_point": knee_point,
         "best_by_metric": best_by_metric,
-        "best_by_season_total_gain": best_by_season_total_gain,
+        "highest_seasonal_gain_absolute": highest_seasonal_gain_absolute,
+        "seasonal_smallest_good_enough": seasonal_smallest_good_enough,
+        "seasonal_knee_points": seasonal_knee_points,
         "decision_profiles": decision_profiles,
         "candidates": candidates,
     }

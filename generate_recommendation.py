@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate battery sizing recommendations from a PDF report using a local Ollama model.
+Generate battery sizing recommendations from a PDF report and/or KPI summary using a local Ollama model.
 
-Example:
+Examples:
   python generate_recommendation.py out/battery_graph_report.pdf --model llama3.1
+  python generate_recommendation.py --kpi-summary-json out/kpi_summary/kpi_summary.json --model llama3.1
 """
 
 from __future__ import annotations
@@ -29,11 +30,11 @@ def extract_pdf_text(pdf_path: Path) -> str:
     return "\n".join(parts).strip()
 
 
-def build_prompt(report_text: str) -> str:
-    """Build a recommendation prompt from extracted report text."""
+def build_prompt(report_text: str, *, kpi_summary_json_text: str = "", kpi_summary_markdown_text: str = "") -> str:
+    """Build a recommendation prompt from report text and structured KPI summary context."""
     template = """
 You are an expert energy storage analyst.
-Use the report content below to produce a practical battery recommendation.
+Use the available report content and KPI summary context below to produce a practical battery recommendation.
 
 Return ONLY a valid JSON object (no markdown, no comments) with this schema:
 {{
@@ -47,17 +48,34 @@ Return ONLY a valid JSON object (no markdown, no comments) with this schema:
 }}
 
 Rules:
-- Base recommendation only on report evidence.
+- Base recommendation only on provided evidence.
+- If KPI Summary JSON is provided, treat it as the authoritative numeric source for rankings, thresholds and winners.
+- Use PDF/report text mainly for qualitative context and consistency checks.
+- If there is a conflict between PDF narrative and KPI Summary JSON values, prefer the KPI Summary JSON values.
 - If a metric is missing, explicitly write "not available in report".
 - Do not reference page numbers.
 - Keep each bullet concise and professional.
 
-Report content:
+KPI Summary JSON (optional):
+---
+{kpi_summary_json_text}
+---
+
+KPI Summary Markdown (optional):
+---
+{kpi_summary_markdown_text}
+---
+
+Report content extracted from PDF (optional):
 ---
 {report_text}
 ---
 """
-    return template.format(report_text=report_text)
+    return template.format(
+        report_text=report_text,
+        kpi_summary_json_text=kpi_summary_json_text or "not provided",
+        kpi_summary_markdown_text=kpi_summary_markdown_text or "not provided",
+    )
 
 
 def call_ollama(
@@ -212,7 +230,7 @@ def parse_args() -> argparse.Namespace:
         "pdf_file",
         nargs="?",
         default="out/battery_graph_report.pdf",
-        help="Path to input PDF report (default: out/battery_graph_report.pdf).",
+        help="Path to input PDF report (default: out/battery_graph_report.pdf). Optional if KPI summary is provided.",
     )
     parser.add_argument(
         "--model",
@@ -248,22 +266,69 @@ def parse_args() -> argparse.Namespace:
         default=120000,
         help="Max number of characters from the report to send to the model.",
     )
+    parser.add_argument(
+        "--kpi-summary-json",
+        default=None,
+        help="Optional KPI summary JSON file (e.g. out/kpi_summary/kpi_summary.json).",
+    )
+    parser.add_argument(
+        "--kpi-summary-md",
+        default=None,
+        help="Optional KPI summary Markdown file (e.g. out/kpi_summary/kpi_summary.md).",
+    )
+    parser.add_argument(
+        "--max-kpi-chars",
+        type=int,
+        default=80000,
+        help="Max characters per KPI summary input (JSON/Markdown) to send to the model.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     pdf_path = Path(args.pdf_file)
+    report_text = ""
+    if pdf_path.exists() and pdf_path.is_file():
+        report_text = extract_pdf_text(pdf_path)
+        if not report_text:
+            print(f"Warning: No extractable text found in PDF: {pdf_path}", file=sys.stderr)
+        else:
+            print(f"Loaded PDF report text: {pdf_path}")
+    else:
+        print(f"Warning: PDF file not found, continuing without PDF context: {pdf_path}", file=sys.stderr)
 
-    if not pdf_path.exists() or not pdf_path.is_file():
-        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    kpi_summary_json_text = ""
+    if args.kpi_summary_json:
+        kpi_json_path = Path(args.kpi_summary_json)
+        if kpi_json_path.exists() and kpi_json_path.is_file():
+            kpi_summary_json_text = kpi_json_path.read_text(encoding="utf-8")
+            print(f"Loaded KPI summary JSON: {kpi_json_path}")
+        else:
+            print(f"Warning: KPI summary JSON not found, skipping: {kpi_json_path}", file=sys.stderr)
 
-    report_text = extract_pdf_text(pdf_path)
-    if not report_text:
-        raise RuntimeError("No extractable text found in PDF.")
+    kpi_summary_markdown_text = ""
+    if args.kpi_summary_md:
+        kpi_md_path = Path(args.kpi_summary_md)
+        if kpi_md_path.exists() and kpi_md_path.is_file():
+            kpi_summary_markdown_text = kpi_md_path.read_text(encoding="utf-8")
+            print(f"Loaded KPI summary Markdown: {kpi_md_path}")
+        else:
+            print(f"Warning: KPI summary Markdown not found, skipping: {kpi_md_path}", file=sys.stderr)
 
-    clipped = report_text[: args.max_chars]
-    prompt = build_prompt(clipped)
+    if not report_text and not kpi_summary_json_text and not kpi_summary_markdown_text:
+        raise FileNotFoundError(
+            "No usable input context found. Provide a PDF report and/or KPI summary (--kpi-summary-json / --kpi-summary-md)."
+        )
+
+    clipped_report = report_text[: args.max_chars] if report_text else ""
+    clipped_kpi_json = kpi_summary_json_text[: args.max_kpi_chars] if kpi_summary_json_text else ""
+    clipped_kpi_md = kpi_summary_markdown_text[: args.max_kpi_chars] if kpi_summary_markdown_text else ""
+    prompt = build_prompt(
+        clipped_report,
+        kpi_summary_json_text=clipped_kpi_json,
+        kpi_summary_markdown_text=clipped_kpi_md,
+    )
     raw = call_ollama(
         args.model,
         prompt,

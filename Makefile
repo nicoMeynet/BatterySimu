@@ -73,17 +73,16 @@ help:
 	@echo "  kpi_summary    Compute deterministic KPI rankings from simulation JSON outputs"
 	@echo "  run_notebooks  Execute comparison notebooks and refresh exported graphs"
 	@echo "  pdf_report     Build the PDF report from exported graph images + simulation outputs"
-	@echo "  recommend      Generate recommendation markdown from the PDF via Ollama"
+	@echo "  recommend      Generate recommendation markdown from PDF/KPI summary via Ollama"
 	@echo ""
 	@echo "Typical workflow:"
 	@echo "  make venv"
 	@echo "  source venv/bin/activate"
 	@echo "  make simulate_all"
 	@echo "  make kpi_summary"
+	@echo "  make recommend"
 	@echo "  make run_notebooks"
 	@echo "  make pdf_report"
-	@echo "  make recommend"
-	@echo "  make pdf_report   # rebuild PDF to include recommendation"
 
 .PHONY: all
 all: venv activate
@@ -232,9 +231,25 @@ pdf_report:
 
 .PHONY: recommend
 recommend:
-	@echo "Generating recommendation from PDF with local Ollama..."
-	@$(VENV_DIR)/bin/python generate_recommendation.py \
+	@echo "Generating recommendation from PDF/KPI summary with local Ollama..."
+	@kpi_json_arg=""; \
+	if [ -f "$(KPI_SUMMARY_JSON)" ]; then \
+		echo "Including KPI summary JSON from $(KPI_SUMMARY_JSON)"; \
+		kpi_json_arg="$(KPI_SUMMARY_JSON)"; \
+	else \
+		echo "KPI summary JSON not found: $(KPI_SUMMARY_JSON) (continuing without KPI JSON context)."; \
+	fi; \
+	kpi_md_arg=""; \
+	if [ -f "$(KPI_SUMMARY_MD)" ]; then \
+		echo "Including KPI summary Markdown from $(KPI_SUMMARY_MD)"; \
+		kpi_md_arg="$(KPI_SUMMARY_MD)"; \
+	else \
+		echo "KPI summary Markdown not found: $(KPI_SUMMARY_MD) (continuing without KPI Markdown context)."; \
+	fi; \
+	$(VENV_DIR)/bin/python generate_recommendation.py \
 		"$(RECOMMEND_INPUT_PDF)" \
+		$${kpi_json_arg:+--kpi-summary-json "$$kpi_json_arg"} \
+		$${kpi_md_arg:+--kpi-summary-md "$$kpi_md_arg"} \
 		--model "$(OLLAMA_MODEL)" \
 		--temperature "$(OLLAMA_TEMPERATURE)" \
 		--top-p "$(OLLAMA_TOP_P)" \
