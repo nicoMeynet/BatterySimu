@@ -21,6 +21,207 @@ from typing import Any
 SEASON_ORDER = ["winter", "spring", "summer", "autumn"]
 
 
+DEFAULT_KPI_CONFIG: dict[str, Any] = {
+    "thresholds": {
+        "global_knee_marginal_gain_chf_per_added_kwh": 20.0,
+        "seasonal_knee_marginal_gain_chf_per_added_kwh": 20.0,
+        "smallest_good_enough": {
+            "annualized_gain_fraction_of_max": 0.90,
+            "bill_reduction_fraction_of_max": 0.90,
+        },
+        "seasonal_smallest_good_enough": {
+            "gain_fraction_of_max": 0.90,
+        },
+    },
+    "decision_profiles": {
+        "balanced": {
+            "description": "Balanced tradeoff across finance, autonomy, robustness, and oversizing risk.",
+            "weights": [
+                {"metric": "annualized_gain_chf", "direction": "max", "weight": 0.25},
+                {"metric": "bill_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.20},
+                {"metric": "grid_consumed_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.15},
+                {"metric": "amortization_years", "direction": "min", "weight": 0.15},
+                {"metric": "max_season_evening_undersize_pct", "direction": "min", "weight": 0.15},
+                {"metric": "max_season_energy_undersize_pct", "direction": "min", "weight": 0.05},
+                {"metric": "avg_season_avg_full_pct", "direction": "min", "weight": 0.05},
+            ],
+        },
+        "roi_first": {
+            "description": "Prioritize financial return and payback speed while avoiding severe seasonal shortfalls.",
+            "weights": [
+                {"metric": "annualized_gain_chf", "direction": "max", "weight": 0.35},
+                {"metric": "amortization_years", "direction": "min", "weight": 0.35},
+                {"metric": "bill_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.15},
+                {"metric": "max_season_evening_undersize_pct", "direction": "min", "weight": 0.10},
+                {"metric": "battery_size_kwh", "direction": "min", "weight": 0.05},
+            ],
+        },
+        "autonomy_first": {
+            "description": "Prioritize grid import reduction and seasonal energy adequacy.",
+            "weights": [
+                {"metric": "grid_consumed_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.30},
+                {"metric": "bill_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.10},
+                {"metric": "max_season_evening_undersize_pct", "direction": "min", "weight": 0.25},
+                {"metric": "max_season_energy_undersize_pct", "direction": "min", "weight": 0.20},
+                {"metric": "max_season_avg_empty_pct", "direction": "min", "weight": 0.10},
+                {"metric": "avg_season_power_at_max_pct", "direction": "min", "weight": 0.05},
+            ],
+        },
+        "winter_robustness": {
+            "description": "Prioritize winter performance and peak-period coverage robustness.",
+            "weights": [
+                {"metric": "winter_total_gain_chf", "direction": "max", "weight": 0.15},
+                {"metric": "winter_evening_undersize_pct", "direction": "min", "weight": 0.30},
+                {"metric": "winter_energy_undersize_pct", "direction": "min", "weight": 0.25},
+                {"metric": "winter_avg_empty_pct", "direction": "min", "weight": 0.15},
+                {"metric": "annualized_gain_chf", "direction": "max", "weight": 0.10},
+                {"metric": "battery_size_kwh", "direction": "min", "weight": 0.05},
+            ],
+        },
+    },
+}
+
+
+def deep_copy_jsonable(obj: Any) -> Any:
+    return json.loads(json.dumps(obj))
+
+
+def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = deep_copy_jsonable(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = deep_merge_dicts(merged[key], value)  # type: ignore[arg-type]
+        else:
+            merged[key] = value
+    return merged
+
+
+def clamp_fraction(value: Any, *, default: float) -> float:
+    v = safe_float(value)
+    if v is None:
+        return default
+    return max(0.0, min(1.0, v))
+
+
+def positive_or_default(value: Any, *, default: float) -> float:
+    v = safe_float(value)
+    if v is None or v <= 0:
+        return default
+    return v
+
+
+def load_kpi_config(config_path: Path | None) -> tuple[dict[str, Any], str]:
+    """
+    Load KPI tuning config from JSON and merge onto defaults.
+    Returns (config, source_label).
+    """
+    cfg = deep_copy_jsonable(DEFAULT_KPI_CONFIG)
+    if config_path is None:
+        return cfg, "built-in defaults"
+
+    if not config_path.exists() or not config_path.is_file():
+        return cfg, f"built-in defaults (config not found: {config_path})"
+
+    loaded = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"KPI config must be a JSON object: {config_path}")
+    cfg = deep_merge_dicts(cfg, loaded)
+    return cfg, str(config_path)
+
+
+def build_decision_profiles_from_config(kpi_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    profiles_blob = kpi_config.get("decision_profiles", {}) or {}
+    profiles: dict[str, dict[str, Any]] = {}
+
+    if not isinstance(profiles_blob, dict):
+        profiles_blob = {}
+
+    for profile_name, raw_profile in profiles_blob.items():
+        if not isinstance(raw_profile, dict):
+            continue
+        description = str(raw_profile.get("description", "")).strip() or f"{profile_name} decision profile."
+        raw_weights = raw_profile.get("weights", [])
+        weights: list[tuple[str, str, float]] = []
+        if not isinstance(raw_weights, list):
+            raw_weights = []
+        for item in raw_weights:
+            key = None
+            direction = None
+            weight = None
+            if isinstance(item, dict):
+                key = item.get("metric") or item.get("key")
+                direction = item.get("direction")
+                weight = item.get("weight")
+            elif isinstance(item, (list, tuple)) and len(item) == 3:
+                key, direction, weight = item
+
+            key = str(key).strip() if key is not None else ""
+            direction = str(direction).strip().lower() if direction is not None else ""
+            weight_f = safe_float(weight)
+            if not key or direction not in ("max", "min") or weight_f is None or weight_f <= 0:
+                continue
+            weights.append((key, direction, weight_f))
+
+        if weights:
+            profiles[str(profile_name)] = {
+                "description": description,
+                "weights": weights,
+            }
+
+    if profiles:
+        return profiles
+
+    # Safety fallback to defaults if user config zeroed everything out.
+    return build_decision_profiles_from_config(deep_copy_jsonable(DEFAULT_KPI_CONFIG))
+
+
+def resolve_kpi_settings(
+    kpi_config: dict[str, Any],
+    *,
+    cli_global_knee_threshold: float | None,
+    cli_seasonal_knee_threshold: float | None,
+) -> dict[str, Any]:
+    thresholds = kpi_config.get("thresholds", {}) or {}
+    if not isinstance(thresholds, dict):
+        thresholds = {}
+
+    sge = thresholds.get("smallest_good_enough", {}) or {}
+    if not isinstance(sge, dict):
+        sge = {}
+    seasonal_sge = thresholds.get("seasonal_smallest_good_enough", {}) or {}
+    if not isinstance(seasonal_sge, dict):
+        seasonal_sge = {}
+
+    global_knee = (
+        positive_or_default(cli_global_knee_threshold, default=20.0)
+        if cli_global_knee_threshold is not None
+        else positive_or_default(thresholds.get("global_knee_marginal_gain_chf_per_added_kwh"), default=20.0)
+    )
+    seasonal_knee = (
+        positive_or_default(cli_seasonal_knee_threshold, default=global_knee)
+        if cli_seasonal_knee_threshold is not None
+        else positive_or_default(thresholds.get("seasonal_knee_marginal_gain_chf_per_added_kwh"), default=global_knee)
+    )
+
+    return {
+        "global_knee_marginal_gain_chf_per_added_kwh": round_or_none(global_knee),
+        "seasonal_knee_marginal_gain_chf_per_added_kwh": round_or_none(seasonal_knee),
+        "smallest_good_enough": {
+            "annualized_gain_fraction_of_max": round_or_none(
+                clamp_fraction(sge.get("annualized_gain_fraction_of_max"), default=0.90), 4
+            ),
+            "bill_reduction_fraction_of_max": round_or_none(
+                clamp_fraction(sge.get("bill_reduction_fraction_of_max"), default=0.90), 4
+            ),
+        },
+        "seasonal_smallest_good_enough": {
+            "gain_fraction_of_max": round_or_none(
+                clamp_fraction(seasonal_sge.get("gain_fraction_of_max"), default=0.90), 4
+            ),
+        },
+    }
+
+
 def safe_float(value: Any) -> float | None:
     if value in (None, ""):
         return None
@@ -262,53 +463,17 @@ def norm_metric(value: float | None, values: list[float], higher_is_better: bool
 def rank_profiles(
     candidates: list[dict[str, Any]],
     knee_point: dict[str, Any] | None,
+    *,
+    profile_definitions: dict[str, dict[str, Any]],
+    smallest_good_enough_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     nonbaseline = [c for c in candidates if not c["is_baseline"]]
     profiles: dict[str, dict[str, Any]] = {
-        "balanced": {
-            "description": "Balanced tradeoff across finance, autonomy, robustness, and oversizing risk.",
-            "weights": [
-                ("annualized_gain_chf", "max", 0.25),
-                ("bill_reduction_pct_vs_no_battery", "max", 0.20),
-                ("grid_consumed_reduction_pct_vs_no_battery", "max", 0.15),
-                ("amortization_years", "min", 0.15),
-                ("max_season_evening_undersize_pct", "min", 0.15),
-                ("max_season_energy_undersize_pct", "min", 0.05),
-                ("avg_season_avg_full_pct", "min", 0.05),
-            ],
-        },
-        "roi_first": {
-            "description": "Prioritize financial return and payback speed while avoiding severe seasonal shortfalls.",
-            "weights": [
-                ("annualized_gain_chf", "max", 0.35),
-                ("amortization_years", "min", 0.35),
-                ("bill_reduction_pct_vs_no_battery", "max", 0.15),
-                ("max_season_evening_undersize_pct", "min", 0.10),
-                ("battery_size_kwh", "min", 0.05),
-            ],
-        },
-        "autonomy_first": {
-            "description": "Prioritize grid import reduction and seasonal energy adequacy.",
-            "weights": [
-                ("grid_consumed_reduction_pct_vs_no_battery", "max", 0.30),
-                ("bill_reduction_pct_vs_no_battery", "max", 0.10),
-                ("max_season_evening_undersize_pct", "min", 0.25),
-                ("max_season_energy_undersize_pct", "min", 0.20),
-                ("max_season_avg_empty_pct", "min", 0.10),
-                ("avg_season_power_at_max_pct", "min", 0.05),
-            ],
-        },
-        "winter_robustness": {
-            "description": "Prioritize winter performance and peak-period coverage robustness.",
-            "weights": [
-                ("winter_total_gain_chf", "max", 0.15),
-                ("winter_evening_undersize_pct", "min", 0.30),
-                ("winter_energy_undersize_pct", "min", 0.25),
-                ("winter_avg_empty_pct", "min", 0.15),
-                ("annualized_gain_chf", "max", 0.10),
-                ("battery_size_kwh", "min", 0.05),
-            ],
-        },
+        name: {
+            "description": str(profile.get("description", "")),
+            "weights": list(profile.get("weights", [])),
+        }
+        for name, profile in profile_definitions.items()
     }
 
     # Pre-compute metric ranges from non-baseline candidates.
@@ -387,7 +552,13 @@ def rank_profiles(
             }
 
     # Smallest-good-enough profile (constraint-style selector).
-    smallest_good_enough = compute_smallest_good_enough(nonbaseline, knee_point)
+    sge_cfg = smallest_good_enough_config or {}
+    smallest_good_enough = compute_smallest_good_enough(
+        nonbaseline,
+        knee_point,
+        annualized_gain_fraction_of_max=safe_float(sge_cfg.get("annualized_gain_fraction_of_max")) or 0.90,
+        bill_reduction_fraction_of_max=safe_float(sge_cfg.get("bill_reduction_fraction_of_max")) or 0.90,
+    )
     if smallest_good_enough is not None:
         best_by_profile["smallest_good_enough"] = smallest_good_enough["winner"]
         rankings["smallest_good_enough"] = smallest_good_enough["ranking"]
@@ -403,6 +574,9 @@ def rank_profiles(
 def compute_smallest_good_enough(
     nonbaseline: list[dict[str, Any]],
     knee_point: dict[str, Any] | None,
+    *,
+    annualized_gain_fraction_of_max: float = 0.90,
+    bill_reduction_fraction_of_max: float = 0.90,
 ) -> dict[str, Any] | None:
     if not nonbaseline:
         return None
@@ -411,8 +585,11 @@ def compute_smallest_good_enough(
     bills = [metric_value(c, "bill_reduction_pct_vs_no_battery") or 0.0 for c in nonbaseline]
     max_gain = max(gains) if gains else 0.0
     max_bill_pct = max(bills) if bills else 0.0
-    gain_target = 0.90 * max_gain if max_gain > 0 else 0.0
-    bill_target = 0.90 * max_bill_pct if max_bill_pct > 0 else 0.0
+    annualized_gain_fraction_of_max = clamp_fraction(annualized_gain_fraction_of_max, default=0.90)
+    bill_reduction_fraction_of_max = clamp_fraction(bill_reduction_fraction_of_max, default=0.90)
+
+    gain_target = annualized_gain_fraction_of_max * max_gain if max_gain > 0 else 0.0
+    bill_target = bill_reduction_fraction_of_max * max_bill_pct if max_bill_pct > 0 else 0.0
 
     rows: list[dict[str, Any]] = []
     for cand in sorted(nonbaseline, key=lambda c: (c["battery_size_kwh"], c["scenario"])):
@@ -444,8 +621,9 @@ def compute_smallest_good_enough(
     if eligible:
         winner_row = min(eligible, key=lambda r: (r["battery_size_kwh"], r["scenario"]))
         reason = (
-            "Smallest battery size reaching at least 90% of max annualized gain and "
-            "90% of max bill reduction among analyzed configurations."
+            "Smallest battery size reaching at least "
+            f"{int(round(annualized_gain_fraction_of_max * 100))}% of max annualized gain and "
+            f"{int(round(bill_reduction_fraction_of_max * 100))}% of max bill reduction among analyzed configurations."
         )
     elif knee_point:
         winner_row = min(
@@ -468,8 +646,8 @@ def compute_smallest_good_enough(
         "profile": {
             "description": "Constraint-based selector for smallest good-enough battery size.",
             "thresholds": {
-                "annualized_gain_chf_fraction_of_max": 0.90,
-                "bill_reduction_pct_fraction_of_max": 0.90,
+                "annualized_gain_chf_fraction_of_max": round_or_none(annualized_gain_fraction_of_max, 4),
+                "bill_reduction_pct_fraction_of_max": round_or_none(bill_reduction_fraction_of_max, 4),
                 "computed_annualized_gain_target_chf": round_or_none(gain_target),
                 "computed_bill_reduction_target_pct": round_or_none(bill_target),
             },
@@ -755,6 +933,15 @@ def render_markdown(summary: dict[str, Any]) -> str:
     lines.append(
         f"- Non-baseline candidates ranked: {len([c for c in summary['candidates'] if not c.get('is_baseline')])}"
     )
+    if summary.get("kpi_config_source"):
+        lines.append(f"- KPI config source: `{summary['kpi_config_source']}`")
+    kpi_settings = summary.get("kpi_settings", {})
+    if kpi_settings:
+        lines.append(
+            "- KPI thresholds: "
+            f"global knee `{kpi_settings.get('global_knee_marginal_gain_chf_per_added_kwh')}` CHF/year per added kWh; "
+            f"seasonal knee `{kpi_settings.get('seasonal_knee_marginal_gain_chf_per_added_kwh')}` CHF/season per added kWh"
+        )
     lines.append("")
 
     baseline = summary.get("baseline", {})
@@ -886,6 +1073,11 @@ def parse_args() -> argparse.Namespace:
         description="Compute battery-sizing KPI rankings from simulation output JSON files."
     )
     parser.add_argument(
+        "--config",
+        default="config/kpi_scoring.json",
+        help="Optional KPI tuning config JSON (default: config/kpi_scoring.json, falls back to built-in defaults if missing).",
+    )
+    parser.add_argument(
         "--simulation-jsons",
         nargs="*",
         default=[],
@@ -904,14 +1096,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--marginal-gain-threshold",
         type=float,
-        default=20.0,
-        help="Threshold (CHF/year per added kWh) for knee-point detection (default: 20).",
+        default=None,
+        help="Override global knee threshold (CHF/year per added kWh). If omitted, uses KPI config/default.",
+    )
+    parser.add_argument(
+        "--seasonal-marginal-gain-threshold",
+        type=float,
+        default=None,
+        help="Override seasonal knee threshold (CHF/season per added kWh). If omitted, uses KPI config/default.",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    kpi_config_path = Path(args.config) if args.config else None
+    kpi_config, kpi_config_source = load_kpi_config(kpi_config_path)
+    applied_settings = resolve_kpi_settings(
+        kpi_config,
+        cli_global_knee_threshold=args.marginal_gain_threshold,
+        cli_seasonal_knee_threshold=args.seasonal_marginal_gain_threshold,
+    )
+    profile_definitions = build_decision_profiles_from_config(kpi_config)
+
     sim_paths = [Path(p) for p in args.simulation_jsons] if args.simulation_jsons else sorted(
         Path("out/simulation_json").glob("config_*.json")
     )
@@ -922,18 +1129,31 @@ def main() -> None:
     candidates = [build_candidate(p) for p in sorted(sim_paths)]
     candidates.sort(key=lambda c: (c["battery_size_kwh"], c["scenario"]))
     compute_marginals(candidates)
-    knee_point = compute_knee_point(candidates, args.marginal_gain_threshold)
-    decision_profiles = rank_profiles(candidates, knee_point)
+    global_knee_threshold = float(applied_settings["global_knee_marginal_gain_chf_per_added_kwh"])
+    seasonal_knee_threshold = float(applied_settings["seasonal_knee_marginal_gain_chf_per_added_kwh"])
+    knee_point = compute_knee_point(candidates, global_knee_threshold)
+    decision_profiles = rank_profiles(
+        candidates,
+        knee_point,
+        profile_definitions=profile_definitions,
+        smallest_good_enough_config=applied_settings.get("smallest_good_enough", {}),
+    )
 
     baseline = next((c for c in candidates if c.get("is_baseline")), None)
     best_by_metric = compute_best_by_metric(candidates)
     highest_seasonal_gain_absolute = compute_highest_seasonal_gain_absolute(candidates)
-    seasonal_smallest_good_enough = compute_seasonal_smallest_good_enough(candidates, gain_fraction_of_max=0.90)
-    seasonal_knee_points = compute_seasonal_knee_points(candidates, args.marginal_gain_threshold)
+    seasonal_gain_fraction = float(applied_settings["seasonal_smallest_good_enough"]["gain_fraction_of_max"])
+    seasonal_smallest_good_enough = compute_seasonal_smallest_good_enough(
+        candidates,
+        gain_fraction_of_max=seasonal_gain_fraction,
+    )
+    seasonal_knee_points = compute_seasonal_knee_points(candidates, seasonal_knee_threshold)
 
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "marginal_gain_threshold_chf_per_added_kwh": args.marginal_gain_threshold,
+        "kpi_config_source": kpi_config_source,
+        "kpi_settings": applied_settings,
+        "marginal_gain_threshold_chf_per_added_kwh": global_knee_threshold,
         "source_files": [str(p) for p in sorted(sim_paths)],
         "baseline": None
         if baseline is None
@@ -962,6 +1182,12 @@ def main() -> None:
 
     print(f"KPI JSON summary written: {out_json}")
     print(f"KPI Markdown summary written: {out_md}")
+    print(f"KPI config source: {kpi_config_source}")
+    print(
+        "KPI thresholds: "
+        f"global_knee={global_knee_threshold} CHF/year/kWh, "
+        f"seasonal_knee={seasonal_knee_threshold} CHF/season/kWh"
+    )
 
     for profile in ("balanced", "roi_first", "autonomy_first", "winter_robustness", "smallest_good_enough"):
         winner = summary.get("decision_profiles", {}).get("best_by_profile", {}).get(profile)

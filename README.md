@@ -13,6 +13,7 @@ The project compares:
 - `battery_sim.py`: main simulation engine
 - `config/config_*.json`: battery scenarios (battery-only config)
 - `config/energy_tariff.json`: global tariff configuration shared by all scenarios
+- `config/kpi_scoring.json`: KPI scoring weights and thresholds for battery ranking
 - `dataset/`: input CSV files (phase A/B/C power history)
 - `out/`: generated outputs (simulations, graph images, PDF report, LLM recommendations)
 - `battery_comparison_month.ipynb`: monthly comparison notebook
@@ -67,6 +68,7 @@ Main commands:
 
 - `config/config_*.json`: battery-specific settings only (`battery`)
 - `config/energy_tariff.json`: shared tariff settings (`tariff`)
+- `config/kpi_scoring.json`: KPI ranking weights/thresholds (`thresholds`, `decision_profiles`)
 
 ### `out/`
 
@@ -129,17 +131,29 @@ Description:
 - Compute deterministic KPI rankings from simulation JSON outputs.
 - Produce profile-based winners (for example: `balanced`, `roi_first`, `autonomy_first`, `winter_robustness`).
 - Detect a knee point (diminishing returns) and generate LLM-friendly structured summary files.
+- Use a configurable KPI scoring file (`config/kpi_scoring.json`) to tune weights and thresholds without changing code.
 
 Input:
 - Simulation JSON files in `out/simulation_json/*.json` (generated in step a).
+- KPI scoring config file (default): `config/kpi_scoring.json` (optional; built-in defaults are used if missing)
 
 Generated data:
 - `out/kpi_summary/kpi_summary.json` (machine/LLM-friendly structured ranking summary)
 - `out/kpi_summary/kpi_summary.md` (human-readable KPI summary)
+- The JSON/Markdown outputs record the applied KPI config source and resolved thresholds for traceability.
 
 Commands:
 ```bash
+# Default (uses config/kpi_scoring.json if present)
 make kpi_summary
+
+# Use a custom KPI scoring config file
+make kpi_summary KPI_CONFIG=config/my_kpi_scoring.json
+
+# Optional threshold overrides (override config values)
+make kpi_summary \
+  KPI_MARGINAL_GAIN_THRESHOLD=15 \
+  KPI_SEASONAL_MARGINAL_GAIN_THRESHOLD=10
 ```
 
 Example output files:
@@ -225,6 +239,7 @@ Description:
 - Use a local LLM via Ollama to produce a battery configuration recommendation.
 - `make recommend` automatically injects KPI summary context (JSON + Markdown) when available.
 - PDF context is optional (recommended if already generated, but no longer required).
+- The script auto-trims KPI/PDF prompt content to fit `OLLAMA_NUM_CTX` and saves raw model output for debugging on failures.
 
 Input:
 - KPI summary files from step b (auto-detected when present):
@@ -304,6 +319,9 @@ Optional (keep 70B but reduce context):
 make recommend OLLAMA_MODEL=llama3.1:70b-instruct-q4_K_M OLLAMA_NUM_CTX=4096
 ```
 
+If JSON parsing fails, inspect the saved raw model output file (written next to the recommendation output), for example:
+- `out/simulation_llm_recommendation/recommendation_ollama.md.raw_model.txt`
+
 Example output file:
 - `out/simulation_llm_recommendation/recommendation_ollama.md`
 
@@ -354,6 +372,28 @@ Global tariff file (`config/energy_tariff.json`) contains:
   - `off_peak.tariff_inject`
 
 Use `config/config_Zendure2400_2880kwh.json` as a template for new scenarios.
+
+KPI scoring file (`config/kpi_scoring.json`) contains:
+- `thresholds`
+  - `global_knee_marginal_gain_chf_per_added_kwh`
+  - `seasonal_knee_marginal_gain_chf_per_added_kwh`
+  - `smallest_good_enough`
+    - `annualized_gain_fraction_of_max`
+    - `bill_reduction_fraction_of_max`
+  - `seasonal_smallest_good_enough`
+    - `gain_fraction_of_max`
+- `decision_profiles`
+  - profile names such as `balanced`, `roi_first`, `autonomy_first`, `winter_robustness`
+  - each profile defines:
+    - `description`
+    - `weights[]` with:
+      - `metric`
+      - `direction` (`max` or `min`)
+      - `weight`
+
+Tip:
+- Start by adjusting only weights in `balanced` and the two knee thresholds.
+- Keep weights in each profile summing close to `1.0` for readability (the scorer normalizes by total weight anyway).
 
 ## License
 

@@ -51,7 +51,9 @@ OLLAMA_NUM_CTX ?= 8192
 RECOMMENDATION_FILE ?= out/simulation_llm_recommendation/recommendation_ollama.md
 KPI_SUMMARY_JSON ?= out/kpi_summary/kpi_summary.json
 KPI_SUMMARY_MD ?= out/kpi_summary/kpi_summary.md
-KPI_MARGINAL_GAIN_THRESHOLD ?= 20
+KPI_MARGINAL_GAIN_THRESHOLD ?=
+KPI_SEASONAL_MARGINAL_GAIN_THRESHOLD ?=
+KPI_CONFIG ?= config/kpi_scoring.json
 
 DATASETS := \
 	dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
@@ -123,11 +125,24 @@ simulate_all:
 .PHONY: kpi_summary
 kpi_summary:
 	@echo "Computing KPI summary from simulation outputs..."
-	@$(VENV_DIR)/bin/python compute_kpi_summary.py \
+	@echo "Using KPI config: $(KPI_CONFIG)"
+	@global_knee_arg=""; \
+	if [ -n "$(KPI_MARGINAL_GAIN_THRESHOLD)" ]; then \
+		echo "Overriding global knee threshold: $(KPI_MARGINAL_GAIN_THRESHOLD)"; \
+		global_knee_arg="$(KPI_MARGINAL_GAIN_THRESHOLD)"; \
+	fi; \
+	seasonal_knee_arg=""; \
+	if [ -n "$(KPI_SEASONAL_MARGINAL_GAIN_THRESHOLD)" ]; then \
+		echo "Overriding seasonal knee threshold: $(KPI_SEASONAL_MARGINAL_GAIN_THRESHOLD)"; \
+		seasonal_knee_arg="$(KPI_SEASONAL_MARGINAL_GAIN_THRESHOLD)"; \
+	fi; \
+	$(VENV_DIR)/bin/python compute_kpi_summary.py \
+		--config "$(KPI_CONFIG)" \
 		--simulation-jsons $(SIMULATION_JSONS) \
 		--output-json "$(KPI_SUMMARY_JSON)" \
 		--output-markdown "$(KPI_SUMMARY_MD)" \
-		--marginal-gain-threshold "$(KPI_MARGINAL_GAIN_THRESHOLD)"
+		$${global_knee_arg:+--marginal-gain-threshold "$$global_knee_arg"} \
+		$${seasonal_knee_arg:+--seasonal-marginal-gain-threshold "$$seasonal_knee_arg"}
 
 .PHONY: run_notebooks
 run_notebooks:

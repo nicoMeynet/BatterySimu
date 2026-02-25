@@ -1,0 +1,59 @@
+{
+  "thresholds": {
+    "global_knee_marginal_gain_chf_per_added_kwh": 20.0,
+    "seasonal_knee_marginal_gain_chf_per_added_kwh": 20.0,
+    "smallest_good_enough": {
+      "annualized_gain_fraction_of_max": 0.9,
+      "bill_reduction_fraction_of_max": 0.9
+    },
+    "seasonal_smallest_good_enough": {
+      "gain_fraction_of_max": 0.9
+    }
+  },
+  "decision_profiles": {
+    "balanced": {
+      "description": "Balanced tradeoff across finance, autonomy, robustness, and oversizing risk.",
+      "weights": [
+        { "metric": "annualized_gain_chf", "direction": "max", "weight": 0.25 },
+        { "metric": "bill_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.2 },
+        { "metric": "grid_consumed_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.15 },
+        { "metric": "amortization_years", "direction": "min", "weight": 0.15 },
+        { "metric": "max_season_evening_undersize_pct", "direction": "min", "weight": 0.15 },
+        { "metric": "max_season_energy_undersize_pct", "direction": "min", "weight": 0.05 },
+        { "metric": "avg_season_avg_full_pct", "direction": "min", "weight": 0.05 }
+      ]
+    },
+    "roi_first": {
+      "description": "Prioritize financial return and payback speed while avoiding severe seasonal shortfalls.",
+      "weights": [
+        { "metric": "annualized_gain_chf", "direction": "max", "weight": 0.35 },
+        { "metric": "amortization_years", "direction": "min", "weight": 0.35 },
+        { "metric": "bill_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.15 },
+        { "metric": "max_season_evening_undersize_pct", "direction": "min", "weight": 0.1 },
+        { "metric": "battery_size_kwh", "direction": "min", "weight": 0.05 }
+      ]
+    },
+    "autonomy_first": {
+      "description": "Prioritize grid import reduction and seasonal energy adequacy.",
+      "weights": [
+        { "metric": "grid_consumed_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.3 },
+        { "metric": "bill_reduction_pct_vs_no_battery", "direction": "max", "weight": 0.1 },
+        { "metric": "max_season_evening_undersize_pct", "direction": "min", "weight": 0.25 },
+        { "metric": "max_season_energy_undersize_pct", "direction": "min", "weight": 0.2 },
+        { "metric": "max_season_avg_empty_pct", "direction": "min", "weight": 0.1 },
+        { "metric": "avg_season_power_at_max_pct", "direction": "min", "weight": 0.05 }
+      ]
+    },
+    "winter_robustness": {
+      "description": "Prioritize winter performance and peak-period coverage robustness.",
+      "weights": [
+        { "metric": "winter_total_gain_chf", "direction": "max", "weight": 0.15 },
+        { "metric": "winter_evening_undersize_pct", "direction": "min", "weight": 0.3 },
+        { "metric": "winter_energy_undersize_pct", "direction": "min", "weight": 0.25 },
+        { "metric": "winter_avg_empty_pct", "direction": "min", "weight": 0.15 },
+        { "metric": "annualized_gain_chf", "direction": "max", "weight": 0.1 },
+        { "metric": "battery_size_kwh", "direction": "min", "weight": 0.05 }
+      ]
+    }
+  }
+}
