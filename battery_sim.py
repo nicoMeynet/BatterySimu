@@ -515,6 +515,10 @@ def build_canonical_results(
             "bill_with_battery_chf": energy_rent["rentability"]["bill_with_battery_chf"],
             "bill_reduction_chf": energy_rent["rentability"]["bill_reduction_chf"],
             "bill_reduction_pct_vs_no_battery": energy_rent["rentability"]["bill_reduction_pct_vs_no_battery"],
+            "grid_consumed_without_battery_kwh": energy_rent["rentability"]["grid_consumed_without_battery_kwh"],
+            "grid_consumed_with_battery_kwh": energy_rent["rentability"]["grid_consumed_with_battery_kwh"],
+            "grid_consumed_reduction_kwh": energy_rent["rentability"]["grid_consumed_reduction_kwh"],
+            "grid_consumed_reduction_pct_vs_no_battery": energy_rent["rentability"]["grid_consumed_reduction_pct_vs_no_battery"],
             "annualized_gain_chf": annualized_gain if is_global else None,
             "annualization_method": "linear_extrapolation" if is_global else None,
             "amortization_years": amortization_years if is_global else None,
@@ -631,6 +635,18 @@ def compute_energy_and_rentability_from_df(df):
         if total_bill_without_chf > 0
         else None
     )
+    total_grid_consumed_without_kwh = sum(
+        consumed_without[phase][tarif] for phase in PHASE_KEYS for tarif in ["HC", "HP"]
+    ) / 1000.0
+    total_grid_consumed_with_kwh = sum(
+        consumed_with[phase][tarif] for phase in PHASE_KEYS for tarif in ["HC", "HP"]
+    ) / 1000.0
+    total_grid_consumed_reduction_kwh = total_grid_consumed_without_kwh - total_grid_consumed_with_kwh
+    total_grid_consumed_reduction_pct = (
+        (total_grid_consumed_reduction_kwh / total_grid_consumed_without_kwh) * 100.0
+        if total_grid_consumed_without_kwh > 0
+        else None
+    )
 
     return {
         "energy": {
@@ -648,6 +664,10 @@ def compute_energy_and_rentability_from_df(df):
             "bill_with_battery_chf": round_value(total_bill_with_chf),
             "bill_reduction_chf": round_value(bill_reduction_chf),
             "bill_reduction_pct_vs_no_battery": round_value(bill_reduction_pct) if bill_reduction_pct is not None else None,
+            "grid_consumed_without_battery_kwh": round_value(total_grid_consumed_without_kwh),
+            "grid_consumed_with_battery_kwh": round_value(total_grid_consumed_with_kwh),
+            "grid_consumed_reduction_kwh": round_value(total_grid_consumed_reduction_kwh),
+            "grid_consumed_reduction_pct_vs_no_battery": round_value(total_grid_consumed_reduction_pct) if total_grid_consumed_reduction_pct is not None else None,
             "annualization_method": None,
             "annualized_gain_chf": None,
             "amortization_years": None,
