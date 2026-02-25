@@ -24,129 +24,31 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-DEFAULT_INTRO = """This report evaluates multiple residential battery configurations to determine the optimal storage size for the household. The analysis is based on real 3-phase grid measurements collected prior to battery installation, ensuring that all results reflect actual consumption and injection behavior.
+DOC_DEFAULTS_DIR = Path(__file__).resolve().parent / "doc" / "pdf_report"
 
-Using timestamp-level import and export data, the simulator models tariff-aware charge and discharge decisions under defined battery constraints. Each configuration is evaluated against an identical no-battery baseline, enabling a fair and consistent comparison.
 
-To generate meaningful results, the user must provide:
-- Historical grid import and export measurements (without battery)
-- 3-phase power data with adequate time resolution
-- The battery configurations to be tested
-- Applicable tariff parameters
+def load_required_text_from_doc(filename: str) -> str:
+    path = DOC_DEFAULTS_DIR / filename
+    try:
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(
+                f"Missing required documentation text file: {path}. "
+                "Files under doc/pdf_report are mandatory."
+            )
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"Unable to read required documentation text file: {path}") from exc
+    if not text:
+        raise ValueError(f"Required documentation text file is empty: {path}")
+    return text
 
-Measurements can be obtained using a 3-phase energy meter (for example Shelly 3EM) integrated with Home Assistant for data collection and export.
 
-The objective is to support a data-driven investment decision by balancing financial return, energy adequacy, and power limitations, selecting the smallest configuration that delivers robust and sustainable performance across the full year."""
-
-DEFAULT_METHODOLOGY = """## 1. Input Data
-- Real 3-phase household consumption data (Phase A, B, C)
-- Timestamp-level power measurements
-- Historical seasonal load patterns
-- Exported data from Home Assistant
-Data granularity ensures realistic modeling of daily and seasonal variability.
-
-## 2. Simulation Engine
-- Timestamp-by-timestamp battery charge/discharge decisions
-- SOC (State of Charge) tracking with min/max constraints
-- Power limitation enforcement (charge and discharge limits)
-- Efficiency modeling (charge and discharge losses)
-- Priority rules for self-consumption optimization
-Battery behavior is evaluated under physical and electrical constraints.
-
-## 3. Tariff Model
-- Peak and off-peak consumption tariffs
-- Injection tariffs for exported energy
-- Net financial gain calculation versus no battery
-- Cost comparison per scenario
-All financial gains are calculated relative to the no-battery baseline.
-
-## 4. Comparison Baseline
-- Identical household load data
-- Same solar production profile
-- No-battery reference case
-- Identical tariff assumptions
-This ensures consistent and fair scenario comparison.
-
-## 5. Key Performance Indicators (KPIs)
-### Financial Indicators
-- Monthly and seasonal net financial gain
-- Grid import reduction
-- Grid export reduction
-### Energy Indicators
-- Battery energy throughput
-- Equivalent full cycles
-- Energy shifting volume
-### Structural Sizing Indicators
-- Battery full SOC share (oversizing indicator)
-- Battery empty SOC share (undersizing indicator)
-- Daily structural undersizing
-- Evening structural undersizing
-### Power Indicators
-- Active power saturation
-- Idle missed opportunities
-- Power state distribution
-These indicators together provide a multi-dimensional sizing assessment."""
-
-DEFAULT_SCOPE = """## 1. Objective
-This report evaluates multiple residential battery storage configurations in order to:
-- Identify the optimal storage capacity for the household
-- Quantify financial impact versus a no-battery baseline
-- Detect structural undersizing or oversizing conditions
-- Assess seasonal robustness and power limitations
-- Support an investment decision based on measurable indicators
-The goal is to select the smallest battery configuration that provides strong financial and operational performance without structural limitations.
-
-## 2. What This Report Covers
-This report includes:
-- Monthly and seasonal energy behavior analysis
-- Financial gain comparison versus no battery
-- Grid import and export reduction metrics
-- Battery utilization indicators (cycles, throughput, activity duration)
-- Energy saturation indicators (battery full / empty share)
-- Structural undersizing metrics (daily and evening)
-- Power saturation indicators (active and idle constraints)
-All results are derived from simulation based on real household load measurements and applied tariff rules.
-
-## 3. What This Report Does Not Cover
-This report does not include:
-- Hardware degradation modeling beyond maximum cycle assumptions
-- Future tariff changes or regulatory impacts
-- Dynamic market price arbitrage
-- Backup power reliability analysis
-- Installation costs or electrical infrastructure upgrades
-- Financing structure or tax optimization
-The analysis is strictly based on operational performance and direct tariff-based financial impact.
-
-## 4. Target Audience
-This report is intended for:
-- Homeowners evaluating battery investments
-- Energy optimization enthusiasts
-- Technical decision makers
-- Financial decision makers assessing ROI
-- System designers reviewing sizing trade-offs
-The document is structured to support both technical and business-level evaluation."""
-
-DEFAULT_DATA_REQUIREMENTS = """To ensure accurate and meaningful results, the simulation requires:
-
-- Historical household consumption measurements without a battery installed
-- Grid import and export power data
-- 3-phase measurements (A, B, C) with timestamp granularity
-- A defined battery configuration for each tested scenario
-
-Measurements can be collected using:
-
-- A 3-phase energy meter such as Shelly 3EM
-- Integration with Home Assistant for data logging and export
-
-The simulator uses this real-world baseline to perform controlled charge/discharge modeling under defined tariff rules.
-
-Accurate input data is essential, as simulation quality directly depends on measurement quality."""
-
-COPYRIGHT_SHORT = "Copyright (c) 2026 Nicolas Meynet"
-LICENSE_SHORT = (
-    "Personal/non-commercial use allowed. "
-    "Commercial or company use: contact nicolas@meynet.ch"
-)
+DEFAULT_INTRO = load_required_text_from_doc("default_intro.md")
+DEFAULT_METHODOLOGY = load_required_text_from_doc("default_methodology.md")
+DEFAULT_SCOPE = load_required_text_from_doc("default_scope.md")
+DEFAULT_DATA_REQUIREMENTS = load_required_text_from_doc("default_data_requirements.md")
+COPYRIGHT_SHORT = load_required_text_from_doc("copyright_short.txt")
+LICENSE_SHORT = load_required_text_from_doc("license_short.txt")
 
 
 def chunked(items: list[Path], size: int) -> Iterable[list[Path]]:
