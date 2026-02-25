@@ -889,8 +889,8 @@ def build_pdf(
 ) -> None:
     section_specs = [
         ("Global Graphs", global_images),
-        ("Monthly Graphs", monthly_images),
         ("Seasonal Graphs", seasonal_images),
+        ("Monthly Graphs", monthly_images),
     ]
     intro_pages = paginate_structured_lines(parse_structured_text(intro_text)) if intro_text.strip() else []
     methodology_pages = paginate_structured_lines(parse_structured_text(methodology_text)) if methodology_text.strip() else []
