@@ -13,15 +13,17 @@ The project compares:
 - `battery_sim.py`: main simulation engine
 - `config/config_*.json`: battery scenarios (battery-only config)
 - `config/energy_tariff.json`: global tariff configuration shared by all scenarios
-- `config/kpi_scoring.json`: KPI scoring weights and thresholds for battery ranking
+- `config/kpi_scoring.json`: graph-KPI thresholds used for deterministic battery sizing decisions (required by `compute_kpi_summary.py`)
+- `doc/pdf_report/`: mandatory PDF report text snippets (`default_intro.md`, `default_scope.md`, etc.)
 - `dataset/`: input CSV files (phase A/B/C power history)
 - `out/`: generated outputs (simulations, graph images, PDF report, LLM recommendations)
 - `battery_comparison_month.ipynb`: monthly comparison notebook
 - `battery_comparison_season.ipynb`: seasonal comparison notebook
 - `battery_comparison_global.ipynb`: global (full-range) comparison notebook
-- `compute_kpi_summary.py`: computes deterministic KPI rankings from simulation JSON outputs
+- `battery_kpi_recommendation.ipynb`: KPI vote-summary notebook (exports the KPI recommendation graph used in the PDF)
+- `compute_kpi_summary.py`: computes deterministic graph-KPI decision summaries from simulation JSON outputs
 - `generate_pdf_report.py`: builds a PDF report from exported global/seasonal/monthly notebook graphs
-- `generate_recommendation.py`: generates a recommendation from KPI summary and/or PDF report via local Ollama
+- `generate_recommendation.py`: generates a recommendation from KPI summary Markdown via local Ollama
 - `Makefile`: setup and batch run shortcuts
 
 ## Requirements
@@ -57,10 +59,10 @@ Main commands:
 - `make venv`: create/update the virtual environment and install requirements
 - `make activate`: print the activation command
 - `make simulate_all`: run simulations for all battery configs in `config/config_*.json`
-- `make kpi_summary`: compute deterministic KPI rankings (JSON + Markdown) from `out/simulation_json/*.json`
-- `make run_notebooks`: execute notebooks and export graphs
+- `make kpi_summary`: compute deterministic graph-KPI decision outputs (JSON + Markdown) from `out/simulation_json/*.json`
+- `make run_notebooks`: execute global/monthly/seasonal/KPI notebooks and export graphs
 - `make pdf_report`: generate the PDF report from exported graphs and simulation outputs
-- `make recommend`: generate an LLM recommendation markdown file from KPI summary and/or PDF via Ollama
+- `make recommend`: generate an LLM recommendation markdown file from `out/kpi_summary/kpi_summary.md` via Ollama
 
 ## File structure
 
@@ -68,13 +70,14 @@ Main commands:
 
 - `config/config_*.json`: battery-specific settings only (`battery`)
 - `config/energy_tariff.json`: shared tariff settings (`tariff`)
-- `config/kpi_scoring.json`: KPI ranking weights/thresholds (`thresholds`, `decision_profiles`)
+- `config/kpi_scoring.json`: graph-KPI thresholds (`thresholds.graph_kpis.*`)
 
 ### `out/`
 
 - `out/simulation_csv/`: simulation CSV outputs (`config_*.csv`)
 - `out/simulation_json/`: simulation JSON outputs (`config_*.json`)
-- `out/kpi_summary/`: KPI ranking outputs for decision support (`kpi_summary.json`, `kpi_summary.md`)
+- `out/kpi_summary/`: graph-KPI decision outputs for decision support (`kpi_summary.json`, `kpi_summary.md`)
+- `out/kpi_images/`: KPI notebook exported graph(s) used in the PDF AI/final recommendation section
 - `out/month_images/`: exported monthly notebook graphs
 - `out/season_images/`: exported seasonal notebook graphs
 - `out/global_images/`: exported global notebook graphs
@@ -86,7 +89,7 @@ Main commands:
 Recommended KPI-first workflow order:
 1. `Simulation`
 2. `KPI summary`
-3. `AI recommendation` (KPI summary is enough; PDF optional)
+3. `AI recommendation` (Markdown from KPI summary only)
 4. `Notebook analysis and graph export`
 5. `PDF generation`
 
@@ -99,10 +102,45 @@ Description:
 Input:
 - 3 CSV files (phase A/B/C) with columns:
   - `entity_id`
-  - `state` (W)
+  - `state` (power in `W`, signed)
   - `last_changed` (timestamp)
 - One or more battery config files in `config/config_*.json`.
 - Global tariff file in `config/energy_tariff.json`.
+
+CSV dataset format (exact):
+- One CSV file per phase (`A`, `B`, `C`)
+- Comma-separated with header (UTF-8 text)
+- Expected column order in the provided datasets:
+  - `entity_id,state,last_changed`
+- `entity_id`
+  - String sensor identifier from Home Assistant (for example `sensor.shellyem3_..._channel_a_power`)
+  - Dropped by the simulator after loading (used only as source metadata)
+- `state`
+  - Numeric power measurement in **watts (`W`)**
+  - Decimal values are accepted
+  - The simulator expects **power**, not current (`A`)
+  - Sign convention used by the simulator:
+    - positive value => grid import / consumption from grid
+    - negative value => grid export / injection to grid
+- `last_changed`
+  - Timestamp parsed by pandas (`parse_dates=["last_changed"]`)
+  - ISO 8601 timestamps are recommended (your datasets use UTC `Z`, e.g. `2024-12-01T00:00:00.000Z`)
+
+Example (real format):
+```csv
+entity_id,state,last_changed
+sensor.shellyem3_244cab435bf4_channel_a_power,147.39145558806499,2024-11-30T23:00:00.000Z
+sensor.shellyem3_244cab435bf4_channel_a_power,153.50503759636666,2024-12-01T00:00:00.000Z
+```
+
+Pre-processing behavior inside `battery_sim.py`:
+- Timestamps are rounded down to the minute (`floor("min")`)
+- Duplicate rows within the same minute are averaged (`groupby(timestamp).mean()`)
+- Missing minutes are inserted and linearly interpolated per phase
+- Non-numeric `state` values are coerced to `NaN` and dropped
+
+If your source dataset is current (`A`) instead of power (`W`):
+- Convert it to power first before running the simulator (the script does not convert current to power automatically).
 
 Generated data:
 - `out/simulation_csv/<config-name>.csv` (minute-level simulation table)
@@ -125,32 +163,32 @@ Example output files:
 - `out/simulation_csv/config_Zendure2400_5760kwh.csv`
 - `out/simulation_json/config_Zendure2400_5760kwh.json`
 
-### b) KPI summary (deterministic battery sizing ranking)
+### b) KPI summary (deterministic graph-KPI decision matrix)
 
 Description:
-- Compute deterministic KPI rankings from simulation JSON outputs.
-- Produce profile-based winners (for example: `balanced`, `roi_first`, `autonomy_first`, `winter_robustness`).
-- Detect a knee point (diminishing returns) and generate LLM-friendly structured summary files.
-- Use a configurable KPI scoring file (`config/kpi_scoring.json`) to tune weights and thresholds without changing code.
+- Compute deterministic graph-based battery sizing KPIs from simulation JSON outputs.
+- Produce a graph-KPI-only decision summary (JSON + Markdown) used by the LLM and PDF.
+- Each KPI encodes a concrete sizing rule (step-delta or constraint-cap), not a hidden weighted score.
+- Use `config/kpi_scoring.json` to tune graph-KPI thresholds without changing code.
 
 Input:
 - Simulation JSON files in `out/simulation_json/*.json` (generated in step a).
-- KPI scoring config file (default): `config/kpi_scoring.json` (optional; built-in defaults are used if missing)
+- KPI scoring config file (required): `config/kpi_scoring.json`
 
 Generated data:
-- `out/kpi_summary/kpi_summary.json` (machine/LLM-friendly structured ranking summary)
-- `out/kpi_summary/kpi_summary.md` (human-readable KPI summary)
-- The JSON/Markdown outputs record the applied KPI config source and resolved thresholds for traceability.
+- `out/kpi_summary/kpi_summary.json` (machine/LLM-friendly graph-KPI summary)
+- `out/kpi_summary/kpi_summary.md` (human-readable graph-KPI summary, also embedded in the PDF appendix)
+- Outputs record the applied KPI config source and resolved thresholds for traceability.
 
 Commands:
 ```bash
-# Default (uses config/kpi_scoring.json if present)
+# Default (config file is required)
 make kpi_summary
 
 # Use a custom KPI scoring config file
 make kpi_summary KPI_CONFIG=config/my_kpi_scoring.json
 
-# Optional threshold overrides (override config values)
+# Optional CLI overrides (legacy overrides of config values)
 make kpi_summary \
   KPI_MARGINAL_GAIN_THRESHOLD=15 \
   KPI_SEASONAL_MARGINAL_GAIN_THRESHOLD=10
@@ -163,20 +201,25 @@ Example output files:
 ### c) Notebook analysis and graph export
 
 Description:
-- Execute global, monthly, and seasonal notebooks on simulation JSON outputs.
-- Auto-export charts as images for reporting.
+- Execute global, monthly, seasonal, and KPI notebooks on simulation JSON outputs / KPI summary outputs.
+- Auto-export charts as images for reporting (including the KPI recommendation graph used in the PDF).
 
 Input:
 - Simulation JSON files in `out/simulation_json/*.json` (generated in step a).
+- KPI summary files from step b:
+  - `out/kpi_summary/kpi_summary.json`
+  - `out/kpi_summary/kpi_summary.md`
 - Notebooks:
   - `battery_comparison_global.ipynb`
   - `battery_comparison_month.ipynb`
   - `battery_comparison_season.ipynb`
+  - `battery_kpi_recommendation.ipynb`
 
 Generated data:
 - `out/global_images/*.png` (global graphs)
 - `out/month_images/*.png` (monthly graphs)
 - `out/season_images/*.png` (seasonal graphs)
+- `out/kpi_images/*.png` (KPI recommendation graph export)
 
 Commands:
 ```bash
@@ -187,6 +230,7 @@ make run_notebooks
 Example output files:
 - `out/month_images/01_monthly_net_financial_gain_vs_no_battery.png`
 - `out/season_images/01_seasonal_net_financial_gain_vs_no_battery.png`
+- `out/kpi_images/01_graph_kpi_consensus_best_battery.png`
 
 Optional manual run (if you want only global):
 ```bash
@@ -202,15 +246,22 @@ Global notebook output files:
 
 Description:
 - Build a consolidated PDF report from exported graph images.
-- Include intro/methodology/scope/data-requirements sections and configuration cards.
+- Include intro/scope/methodology/configuration sections, graph sections, KPI summary, recommendation sections, and appendices.
 - Include the project `LICENSE` text as a dedicated section when `LICENSE` is present.
-- Graph section order is: global, seasonal, monthly.
+- Include AI recommendation text (if present), KPI recommendation graph (if exported), and `kpi_summary.md` (compact summary + detailed appendix).
+- Graph section order is: global, seasonal, monthly (rendered as renamed analysis sections in the PDF).
+- Current PDF chapter order (TOC): `Introduction`, `Report Scope`, `Input Data Overview`, `Simulation Methodology`, `Tariff Model Configuration`, `Battery Scenarios Evaluated`, `Global (Full-Year) Analysis`, `Seasonal Analysis`, `Monthly Analysis`, `Sizing KPI Summary (Decision Matrix)`, `Final Recommended Configuration`, `Detailed KPI Appendix`, `Data Requirements & Assumptions`, `License`.
 
 Input:
 - Graph images from step c:
   - `out/global_images/*.png` (optional, included first if present)
   - `out/season_images/*.png`
   - `out/month_images/*.png`
+  - `out/kpi_images/01_graph_kpi_consensus_best_battery.png` (optional, used in Final Recommended Configuration)
+- KPI summary markdown from step b (optional but recommended):
+  - `out/kpi_summary/kpi_summary.md`
+- AI recommendation markdown from step e (optional):
+  - `out/simulation_llm_recommendation/recommendation_ollama.md`
 - Scenario config files:
   - `config/config_*.json`
 
@@ -231,21 +282,23 @@ Example output file:
 
 Note:
 - `make pdf_report` automatically includes recommendation text from `out/simulation_llm_recommendation/recommendation_ollama.md` when that file exists.
+- `make pdf_report` automatically includes the KPI recommendation graph from `out/kpi_images/01_graph_kpi_consensus_best_battery.png` when that file exists.
+- `make pdf_report` automatically includes `out/kpi_summary/kpi_summary.md` as:
+  - `Sizing KPI Summary (Decision Matrix)` (single compact page)
+  - `Detailed KPI Appendix` (full markdown with rendered tables)
 - `make pdf_report` automatically includes the `LICENSE` file as a PDF section when that file exists.
+- Files in `doc/pdf_report/` are mandatory for PDF generation (`default_intro.md`, `default_scope.md`, etc.).
 
-### e) AI recommendation from KPI summary and/or PDF (local Ollama)
+### e) AI recommendation from KPI summary Markdown (local Ollama)
 
 Description:
 - Use a local LLM via Ollama to produce a battery configuration recommendation.
-- `make recommend` automatically injects KPI summary context (JSON + Markdown) when available.
-- PDF context is optional (recommended if already generated, but no longer required).
-- The script auto-trims KPI/PDF prompt content to fit `OLLAMA_NUM_CTX` and saves raw model output for debugging on failures.
+- `make recommend` uses `out/kpi_summary/kpi_summary.md` only (no PDF context, no KPI JSON context).
+- The script trims KPI markdown prompt content to fit `OLLAMA_NUM_CTX` and saves raw model output for debugging on failures.
 
 Input:
-- KPI summary files from step b (auto-detected when present):
-  - `out/kpi_summary/kpi_summary.json`
+- KPI summary markdown file from step b:
   - `out/kpi_summary/kpi_summary.md`
-- PDF report from step d (optional, default path: `out/battery_graph_report.pdf`)
 - Local Ollama model (Makefile default is `gemma3:12b`)
 
 Generated data:
@@ -273,7 +326,7 @@ ollama list
 
 Commands:
 ```bash
-# Default recommendation flow (KPI summary is auto-included if present)
+# Default recommendation flow (KPI summary markdown only)
 make recommend
 
 # You can run this before notebooks/PDF if `make kpi_summary` has already been run.
@@ -284,7 +337,7 @@ make recommend \
   OLLAMA_TEMPERATURE=0.2 \
   OLLAMA_TOP_P=0.9 \
   OLLAMA_NUM_CTX=32768 \
-  RECOMMEND_INPUT_PDF=out/my_report.pdf \
+  KPI_SUMMARY_MD=out/kpi_summary/kpi_summary.md \
   RECOMMEND_OUTPUT=out/simulation_llm_recommendation/recommendation_custom.md
 ```
 
@@ -325,9 +378,10 @@ If JSON parsing fails, inspect the saved raw model output file (written next to 
 Example output file:
 - `out/simulation_llm_recommendation/recommendation_ollama.md`
 
-To embed recommendation in PDF:
+To embed recommendation in PDF (and include the KPI recommendation graph + KPI appendix):
 ```bash
 make recommend
+make run_notebooks
 make pdf_report
 ```
 
@@ -373,27 +427,20 @@ Global tariff file (`config/energy_tariff.json`) contains:
 
 Use `config/config_Zendure2400_2880kwh.json` as a template for new scenarios.
 
-KPI scoring file (`config/kpi_scoring.json`) contains:
-- `thresholds`
-  - `global_knee_marginal_gain_chf_per_added_kwh`
-  - `seasonal_knee_marginal_gain_chf_per_added_kwh`
-  - `smallest_good_enough`
-    - `annualized_gain_fraction_of_max`
-    - `bill_reduction_fraction_of_max`
-  - `seasonal_smallest_good_enough`
-    - `gain_fraction_of_max`
-- `decision_profiles`
-  - profile names such as `balanced`, `roi_first`, `autonomy_first`, `winter_robustness`
-  - each profile defines:
-    - `description`
-    - `weights[]` with:
-      - `metric`
-      - `direction` (`max` or `min`)
-      - `weight`
+KPI scoring file (`config/kpi_scoring.json`) contains graph-KPI thresholds only:
+- `thresholds.graph_kpis.global_energy_reduction_kwh.consumed_reduction_increment_pct_points_min`
+- `thresholds.graph_kpis.global_energy_financial_impact_chf.bill_offset_increment_pct_points_min`
+- `thresholds.graph_kpis.global_rentability_overview.amortization_years_max`
+- `thresholds.graph_kpis.global_battery_utilization.pct_max_cycles_per_year_max`
+- `thresholds.graph_kpis.global_battery_status_heatmap.empty_pct_max`
+- `thresholds.graph_kpis.seasonal_power_saturation_at_max_limit.power_saturation_pct_any_season_max`
+- `thresholds.graph_kpis.monthly_structural_evening_energy_undersizing_peak_period.evening_undersize_pct_per_month_max`
+- `thresholds.graph_kpis.monthly_structural_evening_energy_undersizing_peak_period.max_months_above_threshold`
 
-Tip:
-- Start by adjusting only weights in `balanced` and the two knee thresholds.
-- Keep weights in each profile summing close to `1.0` for readability (the scorer normalizes by total weight anyway).
+These thresholds drive the 7 graph KPI rules used in:
+- `out/kpi_summary/kpi_summary.json`
+- `out/kpi_summary/kpi_summary.md`
+- `battery_kpi_recommendation.ipynb` (KPI vote graph)
 
 ## License
 
