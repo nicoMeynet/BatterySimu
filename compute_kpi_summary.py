@@ -18,7 +18,7 @@ from statistics import mean
 from typing import Any
 
 
-SEASON_ORDER = ["winter", "spring", "summer", "autumn"]
+SEASON_ORDER = ["spring", "summer", "autumn", "winter"]
 
 
 DEFAULT_KPI_CONFIG: dict[str, Any] = {

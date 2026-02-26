@@ -63,29 +63,120 @@ def clean_caption(path: Path) -> str:
     return name.replace("_", " ").replace("-", " ").strip().title()
 
 
-def graph_description(image_path: Path) -> str:
+def graph_context_notes(image_path: Path) -> tuple[str, str, str]:
+    parent = image_path.parent.name.lower()
+    if "global" in parent:
+        return (
+            "Global (full-year aggregate) view.",
+            "Read across battery scenarios to compare yearly totals; when a right axis is present, use it as a percentage reference and not as CHF.",
+            "Source: battery_comparison_global.ipynb + out/simulation_json/config_*.json",
+        )
+    if "month" in parent:
+        return (
+            "Monthly view (Jan-Dec) across analyzed battery scenarios.",
+            "Read month-to-month seasonality first, then compare scenario levels/shapes to see where the battery improves performance and where gains flatten.",
+            "Source: battery_comparison_month.ipynb + out/simulation_json/config_*.json",
+        )
+    if "season" in parent:
+        return (
+            "Seasonal sizing view across battery capacities.",
+            "X-axis is total battery size (kWh across phases) and each line represents a season; look for diminishing returns (knee points) as size increases.",
+            "Source: battery_comparison_season.ipynb + out/simulation_json/config_*.json",
+        )
+    return (
+        "Comparison view across simulated battery scenarios.",
+        "Compare relative levels and trends between scenarios using the axis units shown in the chart.",
+        "Source: notebook export + out/simulation_json/",
+    )
+
+
+def graph_description(image_path: Path, *, compact: bool = False) -> str:
     key = image_path.stem.lower()
     key = key.lstrip("0123456789").lstrip("_- ")
+    view_text, read_text, source_text = graph_context_notes(image_path)
 
-    rules = [
-        ("net financial gain", "Shows the net financial benefit versus the no-battery baseline."),
-        ("grid import reduction", "Shows how much grid import is reduced by each battery scenario."),
-        ("grid export reduction", "Shows how much grid export is reduced by storing surplus energy."),
-        ("energy shifting", "Shows the balance between charging and discharging over time."),
-        ("throughput", "Shows total battery energy cycled during the period."),
-        ("equivalent full battery cycles", "Shows estimated equivalent full cycles as a battery usage proxy."),
-        ("battery full", "Shows how often the battery is saturated (potential oversizing signal)."),
-        ("battery empty", "Shows how often the battery is depleted (potential undersizing signal)."),
-        ("undersizing", "Shows structural days where battery energy was insufficient."),
-        ("power saturation", "Shows time spent limited by charge/discharge power constraints."),
-        ("power state distribution", "Shows distribution of operating states across charging/discharging/idle modes."),
-        ("activity duration", "Shows charging and discharging duration over the period."),
-    ]
+    metric_text = "This chart compares the selected metric across simulated battery scenarios."
+    if "energy financial impact" in key or "financial impact" in key:
+        metric_text = (
+            "This chart shows financial impact split by energy channel (import/consumption-side and export/injection-side) in CHF, with a percentage axis when present."
+        )
+    elif "rentability overview" in key:
+        metric_text = (
+            "This chart summarizes high-level financial KPIs (gain, bill impact, payback/rentability indicators) and is useful as a first screening before reading detailed charts."
+        )
+    elif "battery utilization" in key:
+        metric_text = (
+            "This chart summarizes yearly battery usage intensity (for example throughput, cycling and activity) to show how strongly each configuration is used."
+        )
+    elif "status heatmap" in key or "heatmap" in key:
+        metric_text = (
+            "This heatmap shows relative metric intensity across scenarios/periods using color scale encoding; compare cells by color first, then confirm exact labels/axes."
+        )
+    elif "energy reduction" in key:
+        metric_text = (
+            "This chart shows yearly energy reduction effects in kWh versus the no-battery baseline (and may include a right-axis percentage of total consumption when available)."
+        )
+    elif "net financial gain" in key:
+        metric_text = "Higher CHF values indicate larger net financial gain versus the no-battery baseline."
+    elif "grid import reduction" in key:
+        metric_text = "Higher kWh values indicate more grid import avoided thanks to battery charging/discharging behavior."
+    elif "grid export reduction" in key:
+        metric_text = "Higher kWh values indicate more surplus energy retained/shifted instead of being exported to the grid."
+    elif "energy shifting" in key or "energy flow" in key:
+        metric_text = (
+            "This chart compares battery charging/discharging or import/export reduction channels to show how energy is shifted through storage."
+        )
+    elif "throughput" in key:
+        metric_text = (
+            "Higher throughput means more energy cycled through the battery; this often improves savings but also indicates higher utilization."
+        )
+    elif "equivalent full battery cycles" in key or "equivalent full cycles" in key:
+        metric_text = "Equivalent full cycles estimate how intensively the battery is used relative to its capacity."
+    elif "full saturation" in key or "battery full" in key or "full soc" in key:
+        metric_text = (
+            "Higher values mean the battery is full more often, which can indicate oversizing if this remains high across many periods."
+        )
+    elif "empty limitation" in key or "battery empty" in key or "empty soc" in key:
+        metric_text = (
+            "Higher values mean the battery is empty more often, which is a typical undersizing indicator during demand peaks."
+        )
+    elif "structural energy undersizing" in key:
+        metric_text = (
+            "Higher percentages indicate more days where battery energy capacity was insufficient to cover the intended shifting/coverage objective."
+        )
+    elif "evening energy undersizing" in key:
+        metric_text = (
+            "Higher percentages indicate more peak/evening periods with insufficient stored energy, which is critical for comfort and tariff optimization."
+        )
+    elif "power saturation at max limit" in key or "active power saturation" in key:
+        metric_text = (
+            "Higher percentages indicate more time constrained by maximum charge/discharge power, pointing to power-limit bottlenecks rather than energy-capacity limits."
+        )
+    elif "idle power limited" in key or "idle missed opportunities" in key:
+        metric_text = (
+            "Higher percentages indicate more time where the system was idle but could have acted if charge/discharge power limits were higher."
+        )
+    elif "power state distribution" in key:
+        metric_text = (
+            "This chart shows the share of time spent charging, discharging and idle states to understand operating balance over the analyzed period."
+        )
+    elif "activity duration" in key:
+        metric_text = (
+            "This chart compares charging vs discharging duration to show how often the battery is active and whether usage is balanced."
+        )
+    elif "undersizing" in key:
+        metric_text = "Higher values indicate more structural undersizing events (battery energy capacity insufficient for the demand pattern)."
+    elif "power saturation" in key:
+        metric_text = "Higher values indicate more time limited by charge/discharge power constraints."
 
-    for marker, desc in rules:
-        if marker in key:
-            return desc
-    return "Shows comparative battery behavior for this metric across scenarios."
+    if compact:
+        return f"{metric_text} {read_text}"
+    return f"{view_text} {metric_text} {read_text}"
+
+
+def graph_source_text(image_path: Path) -> str:
+    _, _, source_text = graph_context_notes(image_path)
+    return source_text
 
 
 def normalize_power(values: list[int | float] | None) -> str:
@@ -675,28 +766,88 @@ def draw_image_page(
 
     for slot, image_path in zip(block_slots, images):
         left, bottom, width, height = slot
-        title_y = bottom + height - 0.008
-        desc_y = bottom + height - 0.038
+        caption_left = left + 0.006
+        caption_width = max(0.1, width - 0.012)
+        title_y = bottom + height - 0.010
+
+        title_text = clean_caption(image_path)
+        source_text = graph_source_text(image_path)
+
+        is_single = len(images) == 1
+        desc_text = graph_description(image_path, compact=not is_single)
+        if is_single:
+            title_fontsize = 12.8
+            desc_fontsize = 10.2
+            source_fontsize = 9.1
+        else:
+            title_fontsize = 11.7
+            desc_fontsize = 9.2
+            source_fontsize = 8.4
+
+        # Wrap caption text so longer explanations remain readable without overlapping the image.
+        if is_single:
+            title_wrap_width = 68
+            desc_wrap_width = 100
+            source_wrap_width = 104
+        else:
+            title_wrap_width = 72
+            desc_wrap_width = 104
+            source_wrap_width = 108
+        title_lines = textwrap.wrap(title_text, width=title_wrap_width) or [title_text]
+        desc_lines = textwrap.wrap(desc_text, width=desc_wrap_width) or [desc_text]
+        source_lines = textwrap.wrap(source_text, width=source_wrap_width) or [source_text]
+        title_render = "\n".join(title_lines)
+        desc_render = "\n".join(desc_lines)
+        source_render = "\n".join(source_lines)
+
+        if is_single:
+            title_line_h = 0.018
+            desc_line_h = 0.0138
+            source_line_h = 0.0128
+        else:
+            title_line_h = 0.0172
+            desc_line_h = 0.0132
+            source_line_h = 0.0120
+        title_block_h = title_line_h * len(title_lines)
+        desc_top_y = title_y - title_block_h - 0.006
+        desc_block_h = desc_line_h * len(desc_lines)
+        source_top_y = desc_top_y - desc_block_h - 0.004
+        source_block_h = source_line_h * len(source_lines)
 
         # Draw title/description outside of the image area to avoid overlap.
         ax_bg.text(
-            left,
+            caption_left,
             title_y,
-            clean_caption(image_path),
+            title_render,
             ha="left",
             va="top",
-            fontsize=11,
+            fontsize=title_fontsize,
             fontweight="bold",
             color="#374151",
+            linespacing=1.15,
+            clip_on=True,
         )
         ax_bg.text(
-            left,
-            desc_y,
-            graph_description(image_path),
+            caption_left,
+            desc_top_y,
+            desc_render,
             ha="left",
             va="top",
-            fontsize=9.5,
+            fontsize=desc_fontsize,
             color="#6b7280",
+            linespacing=1.18,
+            clip_on=True,
+        )
+        ax_bg.text(
+            caption_left,
+            source_top_y,
+            source_render,
+            ha="left",
+            va="top",
+            fontsize=source_fontsize,
+            color="#9ca3af",
+            linespacing=1.15,
+            clip_on=True,
         )
 
         img = mpimg.imread(image_path)
@@ -705,9 +856,9 @@ def draw_image_page(
         img_ratio = img_w / max(img_h, 1)  # width / height
 
         # Available area under description text.
-        available_top = desc_y - 0.012
+        available_top = source_top_y - source_block_h - 0.010
         available_bottom = bottom
-        max_width = width
+        max_width = caption_width
         max_height = max(0.05, available_top - available_bottom)
 
         # Size axes so image keeps its original aspect ratio without added top whitespace.
@@ -719,7 +870,7 @@ def draw_image_page(
             ax_height = max_height
             ax_width = ax_height * img_ratio * fig_h / fig_w
 
-        ax_left = left + (max_width - ax_width) / 2
+        ax_left = caption_left + (max_width - ax_width) / 2
         ax_bottom = available_top - ax_height  # top-align image under text
 
         ax = fig.add_axes([ax_left, ax_bottom, ax_width, ax_height])
@@ -791,9 +942,9 @@ def build_pdf(
     seasonal_images: list[Path],
 ) -> None:
     section_specs = [
-        ("Global Graphs", global_images),
-        ("Seasonal Graphs", seasonal_images),
-        ("Monthly Graphs", monthly_images),
+        ("Global Graphs", global_images, 2),
+        ("Seasonal Graphs", seasonal_images, 2),
+        ("Monthly Graphs", monthly_images, 2),
     ]
     intro_pages = paginate_structured_lines(parse_structured_text(intro_text)) if intro_text.strip() else []
     methodology_pages = paginate_structured_lines(parse_structured_text(methodology_text)) if methodology_text.strip() else []
@@ -818,14 +969,14 @@ def build_pdf(
         len(list(chunked(energy_tariff_configuration_rows, 2))) if energy_tariff_configuration_rows else 0
     )
     input_data_page_count = 1 if input_data_summary else 0
-    section_page_counts = [len(list(chunked(images, 2))) for _, images in section_specs]
+    section_page_counts = [len(list(chunked(images, per_page))) for _, images, per_page in section_specs]
     toc_page_count = 1
     chapter_counts = [
         ("Introduction", len(intro_pages)),
         ("Report Scope", len(scope_pages)),
         ("AI Recommendation", len(recommendation_pages)),
         ("Input Data Ingested", input_data_page_count),
-        *[(section_title, count) for (section_title, _), count in zip(section_specs, section_page_counts)],
+        *[(section_title, count) for (section_title, _, _), count in zip(section_specs, section_page_counts)],
         ("Simulation Methodology", len(methodology_pages)),
         ("Data Requirements", len(data_requirements_pages)),
         ("Battery Configuration Used", battery_config_page_count),
@@ -893,10 +1044,10 @@ def build_pdf(
             )
             page_index += 1
 
-        for (section_title, images), section_page_count in zip(section_specs, section_page_counts):
+        for (section_title, images, per_page), section_page_count in zip(section_specs, section_page_counts):
             if section_page_count == 0:
                 continue
-            for page_images in chunked(images, 2):
+            for page_images in chunked(images, per_page):
                 draw_image_page(
                     pdf=pdf,
                     section_title=section_title,
