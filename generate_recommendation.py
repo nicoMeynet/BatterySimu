@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate battery sizing recommendations from a PDF report and/or KPI summary using a local Ollama model.
+Generate battery sizing recommendations from KPI summary Markdown using a local Ollama model.
 
-Examples:
-  python generate_recommendation.py out/battery_graph_report.pdf --model llama3.1
-  python generate_recommendation.py --kpi-summary-json out/kpi_summary/kpi_summary.json --model llama3.1
+Example:
+  python generate_recommendation.py --kpi-summary-md out/kpi_summary/kpi_summary.md --model llama3.1
 """
 
 from __future__ import annotations
@@ -18,9 +17,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from pypdf import PdfReader
-
-
 RESPONSE_SCHEMA_TEXT = """{
   "recommended_configuration": "string",
   "recommended_total_kwh": "string",
@@ -30,54 +26,41 @@ RESPONSE_SCHEMA_TEXT = """{
   "system_balance": ["bullet 1", "bullet 2", "..."],
   "data_gaps": ["bullet 1", "..."]
 }"""
-
-
-def extract_pdf_text(pdf_path: Path) -> str:
-    """Extract text from all pages of a PDF file."""
-    reader = PdfReader(str(pdf_path))
-    parts: list[str] = []
-    for page in reader.pages:
-        parts.append(page.extract_text() or "")
-    return "\n".join(parts).strip()
-
-
-def build_prompt(report_text: str, *, kpi_summary_json_text: str = "", kpi_summary_markdown_text: str = "") -> str:
-    """Build a recommendation prompt from report text and structured KPI summary context."""
+def build_prompt(kpi_summary_markdown_text: str) -> str:
+    """Build a recommendation prompt from the graph-KPI summary Markdown."""
     template = """
 You are an expert energy storage analyst.
-Use the available report content and KPI summary context below to produce a practical battery recommendation.
+You are given a KPI summary Markdown document generated from battery simulation results.
+The document is graph-KPI-focused and contains the decision constraints and step-delta rules to use.
 
 Return ONLY a valid JSON object (no markdown, no comments) with this schema:
 {schema_text}
 
-Rules:
-- Base recommendation only on provided evidence.
-- If KPI Summary JSON is provided, treat it as the authoritative numeric source for rankings, thresholds and winners.
-- Use PDF/report text mainly for qualitative context and consistency checks.
-- If there is a conflict between PDF narrative and KPI Summary JSON values, prefer the KPI Summary JSON values.
-- If a metric is missing, explicitly write "not available in report".
-- Do not reference page numbers.
+How to use the KPI Markdown:
+- Treat all sections with "(Constraint Cap)" as hard filters/exclusions first.
+- Treat step-delta sections as "meaningful incremental gain" rules (last size that still adds enough value).
+- If multiple battery sizes remain valid after constraints, choose one and explain the tradeoff explicitly.
+- Prefer exact scenario names, battery sizes, thresholds, and violating examples as written in the Markdown.
+- Do not invent metrics or values that are not present in the KPI Markdown.
+- If information is missing, explicitly write "not available in report".
 - Keep each bullet concise and professional.
 
-KPI Summary JSON (optional):
----
-{kpi_summary_json_text}
----
+Important graph-KPI interpretation:
+- `Global Energy Reduction (Consumed % Step Delta)` and `Global Energy Financial Impact (Bill Offset % Step Delta)` are incremental-value KPIs.
+- `Global Rentability Overview (Amortization Cap)` is an affordability constraint.
+- `Global Battery Utilization (Cycle Wear Cap)` is a durability constraint.
+- `Global Battery Status Heatmap (Empty Share Cap)` is an availability/comfort constraint.
+- `Seasonal Power Saturation At Max Limit (Constraint Cap)` is a seasonal power bottleneck constraint.
+- `Monthly Structural Evening Energy Undersizing Peak Period (Constraint Cap)` is a monthly peak-period adequacy constraint.
+- The Markdown "Notes for LLM Recommendation" section is part of the authoritative guidance and should be followed.
 
-KPI Summary Markdown (optional):
+KPI Summary Markdown (graph-KPI-only):
 ---
 {kpi_summary_markdown_text}
----
-
-Report content extracted from PDF (optional):
----
-{report_text}
 ---
 """
     return template.format(
         schema_text=RESPONSE_SCHEMA_TEXT,
-        report_text=report_text,
-        kpi_summary_json_text=kpi_summary_json_text or "not provided",
         kpi_summary_markdown_text=kpi_summary_markdown_text or "not provided",
     )
 
@@ -204,202 +187,6 @@ def _extract_json_object(raw: str) -> dict:
     raise RuntimeError("Unable to locate complete JSON object in model output.")
 
 
-def _compact_kpi_summary_json_for_prompt(raw_json_text: str) -> str:
-    """
-    Reduce KPI summary JSON to the most decision-relevant parts to stay within model context.
-    If parsing fails, return the raw text unchanged (caller will clip).
-    """
-    try:
-        data = json.loads(raw_json_text)
-    except Exception:
-        return raw_json_text
-
-    compact: dict[str, object] = {
-        "generated_at_utc": data.get("generated_at_utc"),
-        "baseline": data.get("baseline"),
-        "knee_point": data.get("knee_point"),
-        "best_by_metric": data.get("best_by_metric"),
-        "decision_profiles_best_by_profile": data.get("decision_profiles", {}).get("best_by_profile", {}),
-        "seasonal_smallest_good_enough": data.get("seasonal_smallest_good_enough", {}),
-        "seasonal_knee_points": data.get("seasonal_knee_points", {}),
-    }
-
-    rankings = data.get("decision_profiles", {}).get("rankings", {})
-    compact_rankings: dict[str, object] = {}
-    if isinstance(rankings, dict):
-        for profile_name, rows in rankings.items():
-            if not isinstance(rows, list):
-                continue
-            compact_rows = []
-            for row in rows[:3]:
-                if not isinstance(row, dict):
-                    continue
-                compact_rows.append(
-                    {
-                        "rank": row.get("rank"),
-                        "scenario": row.get("scenario"),
-                        "battery_size_kwh": row.get("battery_size_kwh"),
-                        "score": row.get("score"),
-                        "key_metrics": row.get("key_metrics", {}),
-                    }
-                )
-            compact_rankings[profile_name] = compact_rows
-    compact["decision_profiles_top3"] = compact_rankings
-
-    candidates = data.get("candidates", [])
-    if isinstance(candidates, list):
-        compact_candidates = []
-        for cand in candidates:
-            if not isinstance(cand, dict):
-                continue
-            compact_candidates.append(
-                {
-                    "scenario": cand.get("scenario"),
-                    "battery_size_kwh": cand.get("battery_size_kwh"),
-                    "is_baseline": cand.get("is_baseline"),
-                    "metrics": {
-                        k: cand.get("metrics", {}).get(k)
-                        for k in [
-                            "annualized_gain_chf",
-                            "amortization_years",
-                            "bill_reduction_pct_vs_no_battery",
-                            "grid_consumed_reduction_pct_vs_no_battery",
-                            "max_season_evening_undersize_pct",
-                            "max_season_energy_undersize_pct",
-                            "winter_total_gain_chf",
-                        ]
-                    },
-                    "derived": {
-                        "marginal_annualized_gain_chf_per_added_kwh": cand.get("derived", {}).get(
-                            "marginal_annualized_gain_chf_per_added_kwh"
-                        )
-                    },
-                }
-            )
-        compact["candidates_compact"] = compact_candidates
-
-    return json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
-
-
-def _shrink_kpi_json_text_for_prompt(kpi_json_text: str, max_chars: int) -> str:
-    """
-    Keep KPI JSON valid while shrinking for prompt budget.
-    Prefer preserving winners/knee points and reduce candidate/ranking detail first.
-    """
-    if not kpi_json_text or len(kpi_json_text) <= max_chars:
-        return kpi_json_text
-    try:
-        data = json.loads(kpi_json_text)
-    except Exception:
-        # Last resort: raw trim. (Should rarely happen because caller compacts first.)
-        return kpi_json_text[:max_chars]
-
-    def dumps(obj: object) -> str:
-        return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-
-    # Tier 0: already compact object.
-    out = dumps(data)
-    if len(out) <= max_chars:
-        return out
-
-    # Tier 1: reduce profile ranking depth.
-    tier = dict(data)
-    if isinstance(tier.get("decision_profiles_top3"), dict):
-        reduced_rankings = {}
-        for profile, rows in tier["decision_profiles_top3"].items():
-            if isinstance(rows, list):
-                reduced_rows = []
-                for row in rows[:2]:
-                    if isinstance(row, dict):
-                        reduced_rows.append(
-                            {
-                                "rank": row.get("rank"),
-                                "scenario": row.get("scenario"),
-                                "battery_size_kwh": row.get("battery_size_kwh"),
-                                "score": row.get("score"),
-                            }
-                        )
-                reduced_rankings[profile] = reduced_rows
-        tier["decision_profiles_top3"] = reduced_rankings
-    out = dumps(tier)
-    if len(out) <= max_chars:
-        return out
-
-    # Tier 2: flatten candidate detail to a minimal per-candidate table.
-    tier2 = dict(tier)
-    candidates = tier2.pop("candidates_compact", None)
-    if isinstance(candidates, list):
-        minimal_candidates = []
-        for cand in candidates:
-            if not isinstance(cand, dict):
-                continue
-            metrics = cand.get("metrics", {}) if isinstance(cand.get("metrics"), dict) else {}
-            derived = cand.get("derived", {}) if isinstance(cand.get("derived"), dict) else {}
-            minimal_candidates.append(
-                {
-                    "scenario": cand.get("scenario"),
-                    "battery_size_kwh": cand.get("battery_size_kwh"),
-                    "is_baseline": cand.get("is_baseline"),
-                    "annualized_gain_chf": metrics.get("annualized_gain_chf"),
-                    "amortization_years": metrics.get("amortization_years"),
-                    "bill_reduction_pct": metrics.get("bill_reduction_pct_vs_no_battery"),
-                    "grid_consumed_reduction_pct": metrics.get("grid_consumed_reduction_pct_vs_no_battery"),
-                    "winter_total_gain_chf": metrics.get("winter_total_gain_chf"),
-                    "marginal_gain_chf_per_added_kwh": derived.get("marginal_annualized_gain_chf_per_added_kwh"),
-                }
-            )
-        tier2["candidates_minimal"] = minimal_candidates
-    out = dumps(tier2)
-    if len(out) <= max_chars:
-        return out
-
-    # Tier 3: keep only winners / knee points / seasonal picks.
-    keys_to_keep = {
-        "generated_at_utc",
-        "baseline",
-        "knee_point",
-        "best_by_metric",
-        "decision_profiles_best_by_profile",
-        "seasonal_smallest_good_enough",
-        "seasonal_knee_points",
-    }
-    tier3 = {k: v for k, v in tier2.items() if k in keys_to_keep}
-    out = dumps(tier3)
-    if len(out) <= max_chars:
-        return out
-
-    # Tier 4: minimal winners only.
-    tier4 = {
-        "knee_point": tier3.get("knee_point"),
-        "decision_profiles_best_by_profile": tier3.get("decision_profiles_best_by_profile", {}),
-        "seasonal_smallest_good_enough": tier3.get("seasonal_smallest_good_enough", {}),
-        "seasonal_knee_points": tier3.get("seasonal_knee_points", {}),
-    }
-    out = dumps(tier4)
-    if len(out) <= max_chars:
-        return out
-
-    tier5 = {
-        "knee_point": (tier4.get("knee_point") or {}),
-        "decision_profiles_best_by_profile": (tier4.get("decision_profiles_best_by_profile") or {}),
-        "note": "KPI prompt context truncated due model context limit.",
-    }
-    out = dumps(tier5)
-    if len(out) <= max_chars:
-        return out
-
-    # Absolute last resort: keep only profile winners and the note.
-    tier6 = {
-        "decision_profiles_best_by_profile": (tier4.get("decision_profiles_best_by_profile") or {}),
-        "note": "KPI prompt context truncated due model context limit.",
-    }
-    out = dumps(tier6)
-    if len(out) <= max_chars:
-        return out
-
-    return dumps({"note": "KPI summary omitted from prompt because num_ctx is too small."})
-
-
 def _estimate_prompt_char_budget(num_ctx: int) -> int:
     """
     Roughly estimate a safe input character budget for the model prompt from num_ctx.
@@ -416,57 +203,24 @@ def _estimate_prompt_char_budget(num_ctx: int) -> int:
 
 def _fit_prompt_inputs_to_budget(
     *,
-    report_text: str,
-    kpi_json_text: str,
     kpi_md_text: str,
     num_ctx: int,
-    max_report_chars: int,
     max_kpi_chars: int,
-) -> tuple[str, str, str, int]:
+) -> tuple[str, int]:
     """
-    Fit prompt inputs to a context-aware character budget.
-    Prioritize KPI JSON, then KPI Markdown, then PDF report text.
+    Fit KPI Markdown input to a context-aware character budget.
     """
     prompt_budget = _estimate_prompt_char_budget(num_ctx)
-    report = report_text[:max_report_chars] if report_text else ""
-    kpi_json = _shrink_kpi_json_text_for_prompt(kpi_json_text, max_kpi_chars) if kpi_json_text else ""
     kpi_md = kpi_md_text[:max_kpi_chars] if kpi_md_text else ""
-
-    prompt = build_prompt(report, kpi_summary_json_text=kpi_json, kpi_summary_markdown_text=kpi_md)
+    prompt = build_prompt(kpi_md)
     if len(prompt) <= prompt_budget:
-        return report, kpi_json, kpi_md, prompt_budget
+        return kpi_md, prompt_budget
 
-    # First trim report aggressively; KPI JSON is more authoritative.
-    if report:
-        template_without_report = build_prompt("", kpi_summary_json_text=kpi_json, kpi_summary_markdown_text=kpi_md)
-        remaining_for_report = max(0, prompt_budget - len(template_without_report))
-        report = report[:remaining_for_report]
-        prompt = build_prompt(report, kpi_summary_json_text=kpi_json, kpi_summary_markdown_text=kpi_md)
-        if len(prompt) <= prompt_budget:
-            return report, kpi_json, kpi_md, prompt_budget
-
-    # If still too large, drop KPI Markdown before shrinking KPI JSON.
-    if kpi_md:
-        kpi_md = ""
-        prompt = build_prompt(report, kpi_summary_json_text=kpi_json, kpi_summary_markdown_text=kpi_md)
-        if len(prompt) <= prompt_budget:
-            return report, kpi_json, kpi_md, prompt_budget
-
-    # If still too large, keep report empty and shrink KPI JSON to fit.
-    if kpi_json:
-        template_no_inputs = build_prompt("", kpi_summary_json_text="", kpi_summary_markdown_text="")
-        remaining_for_kpi = max(2000, prompt_budget - len(template_no_inputs))
-        # Prefer KPI over PDF when budget is tight.
-        report = ""
-        kpi_json = _shrink_kpi_json_text_for_prompt(kpi_json, remaining_for_kpi)
-        prompt = build_prompt(report, kpi_summary_json_text=kpi_json, kpi_summary_markdown_text="")
-        if len(prompt) <= prompt_budget:
-            return report, kpi_json, "", prompt_budget
-
-    # Final fallback: minimal prompt with whatever fits.
-    if len(prompt) > prompt_budget and report:
-        report = ""
-    return report, kpi_json, kpi_md, prompt_budget
+    # Reserve the fixed prompt template overhead, then trim Markdown content.
+    template_without_md = build_prompt("")
+    remaining_for_md = max(1000, prompt_budget - len(template_without_md))
+    kpi_md = kpi_md[:remaining_for_md]
+    return kpi_md, prompt_budget
 
 
 def _default_raw_debug_path(output_path: Path | None) -> Path:
@@ -523,13 +277,7 @@ def format_recommendation(data: dict) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate battery recommendation from KPI summary and/or PDF report using local Ollama."
-    )
-    parser.add_argument(
-        "pdf_file",
-        nargs="?",
-        default="out/battery_graph_report.pdf",
-        help="Path to input PDF report (default: out/battery_graph_report.pdf). Optional if KPI summary is provided.",
+        description="Generate battery recommendation from KPI summary Markdown using local Ollama."
     )
     parser.add_argument(
         "--model",
@@ -560,26 +308,15 @@ def parse_args() -> argparse.Namespace:
         help="Context window size to request from Ollama (default: 32768).",
     )
     parser.add_argument(
-        "--max-chars",
-        type=int,
-        default=120000,
-        help="Max number of characters from the report to send to the model.",
-    )
-    parser.add_argument(
-        "--kpi-summary-json",
-        default=None,
-        help="Optional KPI summary JSON file (e.g. out/kpi_summary/kpi_summary.json).",
-    )
-    parser.add_argument(
         "--kpi-summary-md",
-        default=None,
-        help="Optional KPI summary Markdown file (e.g. out/kpi_summary/kpi_summary.md).",
+        default="out/kpi_summary/kpi_summary.md",
+        help="KPI summary Markdown file (default: out/kpi_summary/kpi_summary.md).",
     )
     parser.add_argument(
         "--max-kpi-chars",
         type=int,
         default=40000,
-        help="Max characters per KPI summary input (JSON/Markdown) to send to the model.",
+        help="Max characters from KPI summary Markdown to send to the model.",
     )
     parser.add_argument(
         "--raw-debug-output",
@@ -596,28 +333,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    pdf_path = Path(args.pdf_file)
-    report_text = ""
-    if pdf_path.exists() and pdf_path.is_file():
-        report_text = extract_pdf_text(pdf_path)
-        if not report_text:
-            print(f"Warning: No extractable text found in PDF: {pdf_path}", file=sys.stderr)
-        else:
-            print(f"Loaded PDF report text: {pdf_path}")
-    else:
-        print(f"Warning: PDF file not found, continuing without PDF context: {pdf_path}", file=sys.stderr)
-
-    kpi_summary_json_text = ""
-    if args.kpi_summary_json:
-        kpi_json_path = Path(args.kpi_summary_json)
-        if kpi_json_path.exists() and kpi_json_path.is_file():
-            kpi_summary_json_text = kpi_json_path.read_text(encoding="utf-8")
-            print(f"Loaded KPI summary JSON: {kpi_json_path}")
-        else:
-            print(f"Warning: KPI summary JSON not found, skipping: {kpi_json_path}", file=sys.stderr)
-    if kpi_summary_json_text:
-        kpi_summary_json_text = _compact_kpi_summary_json_for_prompt(kpi_summary_json_text)
-
     kpi_summary_markdown_text = ""
     if args.kpi_summary_md:
         kpi_md_path = Path(args.kpi_summary_md)
@@ -625,43 +340,22 @@ def main() -> None:
             kpi_summary_markdown_text = kpi_md_path.read_text(encoding="utf-8")
             print(f"Loaded KPI summary Markdown: {kpi_md_path}")
         else:
-            print(f"Warning: KPI summary Markdown not found, skipping: {kpi_md_path}", file=sys.stderr)
+            raise FileNotFoundError(f"KPI summary Markdown not found: {kpi_md_path}")
 
-    # Avoid duplicating KPI context when JSON is already provided.
-    if kpi_summary_json_text and kpi_summary_markdown_text:
-        print("Info: KPI summary JSON provided; skipping KPI Markdown in prompt to reduce context duplication.")
-        kpi_summary_markdown_text = ""
+    if not kpi_summary_markdown_text:
+        raise FileNotFoundError("No usable input context found. Provide --kpi-summary-md.")
 
-    if not report_text and not kpi_summary_json_text and not kpi_summary_markdown_text:
-        raise FileNotFoundError(
-            "No usable input context found. Provide a PDF report and/or KPI summary (--kpi-summary-json / --kpi-summary-md)."
-        )
-
-    clipped_report, clipped_kpi_json, clipped_kpi_md, prompt_budget = _fit_prompt_inputs_to_budget(
-        report_text=report_text,
-        kpi_json_text=kpi_summary_json_text,
+    clipped_kpi_md, prompt_budget = _fit_prompt_inputs_to_budget(
         kpi_md_text=kpi_summary_markdown_text,
         num_ctx=args.num_ctx,
-        max_report_chars=args.max_chars,
         max_kpi_chars=args.max_kpi_chars,
     )
-    if report_text:
-        print(f"Using PDF report text chars in prompt: {len(clipped_report)} / {min(len(report_text), args.max_chars)}")
-    if kpi_summary_json_text:
-        print(
-            f"Using KPI JSON chars in prompt: {len(clipped_kpi_json)} / "
-            f"{min(len(kpi_summary_json_text), args.max_kpi_chars)}"
-        )
     if kpi_summary_markdown_text:
         print(
             f"Using KPI Markdown chars in prompt: {len(clipped_kpi_md)} / "
             f"{min(len(kpi_summary_markdown_text), args.max_kpi_chars)}"
         )
-    prompt = build_prompt(
-        clipped_report,
-        kpi_summary_json_text=clipped_kpi_json,
-        kpi_summary_markdown_text=clipped_kpi_md,
-    )
+    prompt = build_prompt(clipped_kpi_md)
     if len(prompt) > prompt_budget:
         print(
             "Warning: Prompt still exceeds estimated safe budget "
