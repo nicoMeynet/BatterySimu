@@ -27,6 +27,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 DOC_DEFAULTS_DIR = Path(__file__).resolve().parent / "doc" / "pdf_report"
 TOC_ENTRIES_PER_PAGE = 14
+BATTERY_SCENARIOS_PER_PAGE = 8
 
 
 def load_required_text_from_doc(filename: str) -> str:
@@ -1557,6 +1558,288 @@ def draw_config_cards_page(
     plt.close(fig)
 
 
+def draw_battery_scenarios_compact_page(
+    pdf: PdfPages,
+    rows: list[dict],
+    page_index: int,
+    total_pages: int,
+) -> None:
+    """Compact battery scenario comparison table (denser than card layout)."""
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+
+    ax.text(
+        0.06,
+        0.965,
+        "Battery Scenarios Evaluated",
+        ha="left",
+        va="top",
+        fontsize=18,
+        fontweight="bold",
+        color="#111827",
+        transform=ax.transAxes,
+    )
+    ax.text(
+        0.94,
+        0.965,
+        f"Page {page_index}/{total_pages}",
+        ha="right",
+        va="top",
+        fontsize=10,
+        color="#6b7280",
+        transform=ax.transAxes,
+    )
+
+    ax.text(
+        0.06,
+        0.918,
+        "Compact comparison of simulated battery configurations. Values are read from scenario config/simulation configuration payloads.",
+        ha="left",
+        va="top",
+        fontsize=10.0,
+        color="#4b5563",
+        transform=ax.transAxes,
+        wrap=True,
+    )
+
+    table_rows: list[list[str]] = []
+    for row in rows:
+        field_map = {label: str(value) for label, value in row.get("fields", [])}
+        scenario = str(row.get("scenario", "-"))
+        table_rows.append(
+            [
+                scenario,
+                field_map.get("Total capacity (kWh)", "-"),
+                field_map.get("Capacity / phase (Wh)", "-"),
+                field_map.get("Battery cost (CHF)", "-"),
+                field_map.get("Charge / discharge power (W)", "-"),
+                field_map.get("Charge / discharge efficiency", "-"),
+                field_map.get("SOC min / max (%)", "-"),
+                field_map.get("Max cycles", "-"),
+            ]
+        )
+
+    # Keep the compact table readable on portrait A4.
+    for r in table_rows:
+        r[0] = textwrap.shorten(r[0], width=36, placeholder="...")
+        r[3] = textwrap.shorten(r[3], width=10, placeholder="...")
+
+    table_block = {
+        "kind": "table",
+        "headers": [
+            "Scenario",
+            "Total kWh",
+            "Cap/phase (Wh)",
+            "Cost CHF",
+            "Power C/D (W)",
+            "Eff. C/D",
+            "SOC min/max %",
+            "Max cycles",
+        ],
+        "alignments": ["left", "center", "center", "right", "center", "center", "center", "right"],
+        "rows": table_rows,
+    }
+
+    table_top = 0.885
+    used_h = draw_markdown_table_block(ax, table_block, x=0.05, y_top=table_top, width=0.90)
+    note_y = max(0.06, table_top - used_h - 0.012)
+    ax.text(
+        0.06,
+        note_y,
+        "Ordering: noBattery first, then increasing total battery size (kWh).",
+        ha="left",
+        va="top",
+        fontsize=9.0,
+        color="#6b7280",
+        transform=ax.transAxes,
+        wrap=True,
+    )
+
+    ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af", transform=ax.transAxes)
+    ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af", transform=ax.transAxes)
+
+    pdf.savefig(fig, dpi=220)
+    plt.close(fig)
+
+
+def draw_tariff_model_configuration_page(
+    pdf: PdfPages,
+    row: dict,
+    page_index: int,
+    total_pages: int,
+) -> None:
+    """Compact single-page layout for the tariff model configuration."""
+    fig = plt.figure(figsize=(8.27, 11.69), facecolor="white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.axis("off")
+
+    ax.text(
+        0.06,
+        0.965,
+        "Tariff Model Configuration",
+        ha="left",
+        va="top",
+        fontsize=18,
+        fontweight="bold",
+        color="#111827",
+        transform=ax.transAxes,
+    )
+    ax.text(
+        0.94,
+        0.965,
+        f"Page {page_index}/{total_pages}",
+        ha="right",
+        va="top",
+        fontsize=10,
+        color="#6b7280",
+        transform=ax.transAxes,
+    )
+
+    ax.text(
+        0.06,
+        0.915,
+        "Tariff assumptions used by all simulated battery scenarios. Peak/off-peak pricing and peak schedule determine the financial impact calculations.",
+        ha="left",
+        va="top",
+        fontsize=10.2,
+        color="#4b5563",
+        transform=ax.transAxes,
+        wrap=True,
+    )
+
+    field_map = {label: str(value) for label, value in row.get("fields", [])}
+
+    def draw_panel(x: float, y: float, w: float, h: float, title: str, items: list[tuple[str, str]]) -> None:
+        ax.add_patch(
+            plt.Rectangle(
+                (x, y),
+                w,
+                h,
+                linewidth=1.0,
+                edgecolor="#d1d5db",
+                facecolor="#f9fafb",
+                transform=ax.transAxes,
+            )
+        )
+        is_narrow_panel = w < 0.6
+        inner_pad_x = 0.02
+        inner_right = x + w - inner_pad_x
+        ax.text(
+            x + inner_pad_x,
+            y + h - 0.035,
+            title,
+            ha="left",
+            va="top",
+            fontsize=12.5,
+            fontweight="bold",
+            color="#111827",
+            transform=ax.transAxes,
+        )
+        row_y = y + h - 0.085
+        if is_narrow_panel:
+            label_col_right = x + 0.66 * w
+            value_col_left = x + 0.70 * w
+            value_wrap_width = 14
+            label_wrap_width = 20
+        else:
+            label_col_right = x + 0.24 * w
+            value_col_left = x + 0.27 * w
+            value_wrap_width = 56
+            label_wrap_width = 28
+        # Safety clamps to keep the columns inside the panel if sizes change.
+        label_col_right = min(label_col_right, inner_right - 0.12)
+        value_col_left = max(value_col_left, label_col_right + 0.02)
+        value_col_left = min(value_col_left, inner_right - 0.04)
+        for label, value in items:
+            label_text = label or "-"
+            value_text = value or "-"
+            label_wrapped = "\n".join(textwrap.wrap(label_text, width=label_wrap_width)) or "-"
+            value_wrapped = "\n".join(textwrap.wrap(value_text, width=value_wrap_width)) or "-"
+            ax.text(
+                label_col_right,
+                row_y,
+                label_wrapped,
+                ha="right",
+                va="top",
+                fontsize=10,
+                color="#374151",
+                fontweight="bold",
+                transform=ax.transAxes,
+                linespacing=1.15,
+            )
+            ax.text(
+                value_col_left,
+                row_y,
+                value_wrapped,
+                ha="left",
+                va="top",
+                fontsize=10,
+                color="#111827",
+                transform=ax.transAxes,
+                linespacing=1.15,
+            )
+            label_line_count = label_wrapped.count("\n") + 1
+            value_line_count = value_wrapped.count("\n") + 1
+            row_line_count = max(label_line_count, value_line_count)
+            row_y -= 0.038 + max(0, row_line_count - 1) * 0.018
+
+    # Two compact cards + one schedule strip for readability (single tariff model).
+    draw_panel(
+        0.06,
+        0.60,
+        0.42,
+        0.23,
+        "Peak Tariff",
+        [
+            ("Consume tariff", field_map.get("Peak consume tariff", "-")),
+            ("Inject tariff", field_map.get("Peak inject tariff", "-")),
+        ],
+    )
+    draw_panel(
+        0.52,
+        0.60,
+        0.42,
+        0.23,
+        "Off-Peak Tariff",
+        [
+            ("Consume tariff", field_map.get("Off-peak consume tariff", "-")),
+            ("Inject tariff", field_map.get("Off-peak inject tariff", "-")),
+        ],
+    )
+    draw_panel(
+        0.06,
+        0.36,
+        0.88,
+        0.18,
+        "Peak Schedule (Off-peak = complement)",
+        [
+            ("Peak days", field_map.get("Peak days", "-")),
+            ("Peak hours", field_map.get("Peak hours", "-")),
+        ],
+    )
+
+    ax.text(
+        0.06,
+        0.28,
+        "This tariff model is applied uniformly across the no-battery baseline and all battery scenarios to ensure fair comparisons.",
+        ha="left",
+        va="top",
+        fontsize=9.6,
+        color="#6b7280",
+        transform=ax.transAxes,
+        wrap=True,
+    )
+
+    ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af", transform=ax.transAxes)
+    ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af", transform=ax.transAxes)
+
+    pdf.savefig(fig, dpi=220)
+    plt.close(fig)
+
+
 def draw_input_data_page(
     pdf: PdfPages,
     summary: dict,
@@ -2048,7 +2331,11 @@ def build_pdf(
         if license_text.strip()
         else []
     )
-    battery_config_page_count = len(list(chunked(battery_configuration_rows, 2))) if battery_configuration_rows else 0
+    battery_config_page_count = (
+        len(list(chunked(battery_configuration_rows, BATTERY_SCENARIOS_PER_PAGE)))
+        if battery_configuration_rows
+        else 0
+    )
     energy_tariff_page_count = (
         len(list(chunked(energy_tariff_configuration_rows, 2))) if energy_tariff_configuration_rows else 0
     )
@@ -2143,20 +2430,28 @@ def build_pdf(
             )
             page_index += 1
 
-        for config_chunk in chunked(energy_tariff_configuration_rows, 2):
-            draw_config_cards_page(
+        if len(energy_tariff_configuration_rows) == 1:
+            draw_tariff_model_configuration_page(
                 pdf=pdf,
-                section_title="Tariff Model Configuration",
-                rows=config_chunk,
+                row=energy_tariff_configuration_rows[0],
                 page_index=page_index,
                 total_pages=total_pages,
             )
             page_index += 1
+        else:
+            for config_chunk in chunked(energy_tariff_configuration_rows, 2):
+                draw_config_cards_page(
+                    pdf=pdf,
+                    section_title="Tariff Model Configuration",
+                    rows=config_chunk,
+                    page_index=page_index,
+                    total_pages=total_pages,
+                )
+                page_index += 1
 
-        for config_chunk in chunked(battery_configuration_rows, 2):
-            draw_config_cards_page(
+        for config_chunk in chunked(battery_configuration_rows, BATTERY_SCENARIOS_PER_PAGE):
+            draw_battery_scenarios_compact_page(
                 pdf=pdf,
-                section_title="Battery Scenarios Evaluated",
                 rows=config_chunk,
                 page_index=page_index,
                 total_pages=total_pages,
