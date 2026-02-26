@@ -253,10 +253,22 @@ pdf_report:
 	else \
 		echo "AI recommendation graph not found: $(KPI_RECOMMENDATION_GRAPH_IMAGE) (continuing without recommendation graph)."; \
 	fi; \
+	kpi_summary_file_arg=""; \
+	if [ -f "$(KPI_SUMMARY_MD)" ]; then \
+		if grep -q '[^[:space:]]' "$(KPI_SUMMARY_MD)"; then \
+			echo "Including KPI summary markdown (summary + appendix) from $(KPI_SUMMARY_MD)"; \
+			kpi_summary_file_arg="$(KPI_SUMMARY_MD)"; \
+		else \
+			echo "KPI summary markdown file is empty: $(KPI_SUMMARY_MD) (continuing without KPI summary sections)."; \
+		fi; \
+	else \
+		echo "KPI summary markdown file not found: $(KPI_SUMMARY_MD) (continuing without KPI summary sections)."; \
+	fi; \
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
 		$$global_args \
 		$${recommendation_file_arg:+--recommendation-file "$$recommendation_file_arg"} \
 		$${recommendation_graph_arg:+--recommendation-graph-image "$$recommendation_graph_arg"} \
+		$${kpi_summary_file_arg:+--kpi-summary-file "$$kpi_summary_file_arg"} \
 		--configs $(CONFIGS) \
 		--simulation-jsons $(SIMULATION_JSONS) \
 		--monthly $$monthly_files \
