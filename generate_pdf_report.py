@@ -1605,16 +1605,34 @@ def draw_battery_scenarios_compact_page(
         wrap=True,
     )
 
-    table_rows: list[list[str]] = []
+    def _pretty_scenario_name(raw: str) -> str:
+        s = str(raw or "").strip()
+        if not s:
+            return "-"
+        if s.endswith("_noBattery"):
+            prefix = s[: -len("_noBattery")] or "Scenario"
+            return f"{prefix} (No battery)"
+        if "_" in s and s.lower().endswith("kwh"):
+            base, suffix = s.rsplit("_", 1)
+            return f"{base} ({suffix})"
+        return s
+
+    summary_rows: list[list[str]] = []
+    technical_rows: list[list[str]] = []
     for row in rows:
         field_map = {label: str(value) for label, value in row.get("fields", [])}
-        scenario = str(row.get("scenario", "-"))
-        table_rows.append(
+        scenario = _pretty_scenario_name(str(row.get("scenario", "-")))
+        summary_rows.append(
             [
                 scenario,
                 field_map.get("Total capacity (kWh)", "-"),
                 field_map.get("Capacity / phase (Wh)", "-"),
                 field_map.get("Battery cost (CHF)", "-"),
+            ]
+        )
+        technical_rows.append(
+            [
+                scenario,
                 field_map.get("Charge / discharge power (W)", "-"),
                 field_map.get("Charge / discharge efficiency", "-"),
                 field_map.get("SOC min / max (%)", "-"),
@@ -1622,34 +1640,70 @@ def draw_battery_scenarios_compact_page(
             ]
         )
 
-    # Keep the compact table readable on portrait A4.
-    for r in table_rows:
-        r[0] = textwrap.shorten(r[0], width=36, placeholder="...")
-        r[3] = textwrap.shorten(r[3], width=10, placeholder="...")
+    for r in summary_rows:
+        r[0] = textwrap.shorten(r[0], width=42, placeholder="...")
+    for r in technical_rows:
+        r[0] = textwrap.shorten(r[0], width=42, placeholder="...")
 
-    table_block = {
+    summary_table_block = {
         "kind": "table",
         "headers": [
             "Scenario",
-            "Total kWh",
-            "Cap/phase (Wh)",
-            "Cost CHF",
-            "Power C/D (W)",
-            "Eff. C/D",
-            "SOC min/max %",
-            "Max cycles",
+            "Total Capacity\n(kWh)",
+            "Capacity per Phase\n(Wh)",
+            "Battery Cost\n(CHF)",
         ],
-        "alignments": ["left", "center", "center", "right", "center", "center", "center", "right"],
-        "rows": table_rows,
+        "alignments": ["left", "center", "center", "right"],
+        "rows": summary_rows,
+    }
+    technical_table_block = {
+        "kind": "table",
+        "headers": [
+            "Scenario",
+            "Charge / Discharge\nPower (W)",
+            "Charge / Discharge\nEfficiency",
+            "SOC Minimum / Maximum\n(%)",
+            "Maximum\nCycles",
+        ],
+        "alignments": ["left", "center", "center", "center", "right"],
+        "rows": technical_rows,
     }
 
-    table_top = 0.885
-    used_h = draw_markdown_table_block(ax, table_block, x=0.05, y_top=table_top, width=0.90)
-    note_y = max(0.06, table_top - used_h - 0.012)
+    top_y = 0.872
+    ax.text(
+        0.06,
+        top_y,
+        "Sizing and cost summary",
+        ha="left",
+        va="top",
+        fontsize=10.2,
+        fontweight="bold",
+        color="#374151",
+        transform=ax.transAxes,
+    )
+    summary_table_top = top_y - 0.02
+    used_summary_h = draw_markdown_table_block(ax, summary_table_block, x=0.05, y_top=summary_table_top, width=0.90)
+
+    second_title_y = summary_table_top - used_summary_h - 0.008
+    ax.text(
+        0.06,
+        second_title_y,
+        "Operating limits and lifetime parameters",
+        ha="left",
+        va="top",
+        fontsize=10.2,
+        fontweight="bold",
+        color="#374151",
+        transform=ax.transAxes,
+    )
+    technical_table_top = second_title_y - 0.02
+    used_technical_h = draw_markdown_table_block(ax, technical_table_block, x=0.05, y_top=technical_table_top, width=0.90)
+
+    note_y = max(0.06, technical_table_top - used_technical_h - 0.012)
     ax.text(
         0.06,
         note_y,
-        "Ordering: noBattery first, then increasing total battery size (kWh).",
+        "Ordering: noBattery first, then increasing total battery size (kWh). Full scenario details remain available in the simulation JSON files.",
         ha="left",
         va="top",
         fontsize=9.0,
