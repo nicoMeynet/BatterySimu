@@ -1570,7 +1570,7 @@ def draw_input_data_page(
     ax.text(
         0.04,
         0.95,
-        "Input Data Ingested",
+        "Input Data Overview",
         ha="left",
         va="top",
         fontsize=18,
@@ -1636,7 +1636,7 @@ def draw_kpi_summary_compact_page(
     ax.text(
         0.06,
         0.965,
-        "KPI Summary",
+        "Sizing KPI Summary (Decision Matrix)",
         ha="left",
         va="top",
         fontsize=18,
@@ -1664,7 +1664,7 @@ def draw_kpi_summary_compact_page(
         0.915,
         (
             "Single-page overview of the 7 graph-based sizing KPIs used for battery selection. "
-            "See KPI Appendix for full candidate tables and detailed rationales."
+            "See Detailed KPI Appendix for full candidate tables and detailed rationales."
         ),
         ha="left",
         va="top",
@@ -1790,7 +1790,7 @@ def draw_kpi_summary_compact_page(
         ax.text(
             0.50,
             0.565,
-            "Check the KPI summary markdown format or see the KPI Appendix for raw content.",
+            "Check the KPI summary markdown format or see the Detailed KPI Appendix for raw content.",
             ha="center",
             va="center",
             fontsize=10,
@@ -2022,9 +2022,9 @@ def build_pdf(
     seasonal_images: list[Path],
 ) -> None:
     section_specs = [
-        ("Global Graphs", global_images, 2),
-        ("Seasonal Graphs", seasonal_images, 2),
-        ("Monthly Graphs", monthly_images, 2),
+        ("Global (Full-Year) Analysis", global_images, 2),
+        ("Seasonal Analysis", seasonal_images, 2),
+        ("Monthly Analysis", monthly_images, 2),
     ]
     intro_pages = paginate_structured_lines(parse_structured_text(intro_text)) if intro_text.strip() else []
     methodology_pages = paginate_structured_lines(parse_structured_text(methodology_text)) if methodology_text.strip() else []
@@ -2057,15 +2057,15 @@ def build_pdf(
     chapter_counts = [
         ("Introduction", len(intro_pages)),
         ("Report Scope", len(scope_pages)),
-        ("AI Recommendation", len(recommendation_pages) + recommendation_graph_page_count),
-        ("KPI Summary", kpi_summary_page_count),
-        ("Input Data Ingested", input_data_page_count),
-        *[(section_title, count) for (section_title, _, _), count in zip(section_specs, section_page_counts)],
+        ("Input Data Overview", input_data_page_count),
         ("Simulation Methodology", len(methodology_pages)),
-        ("Data Requirements", len(data_requirements_pages)),
-        ("Battery Configuration Used", battery_config_page_count),
-        ("Energy Tariff Configuration Used", energy_tariff_page_count),
-        ("KPI Appendix", len(kpi_appendix_pages)),
+        ("Tariff Model Configuration", energy_tariff_page_count),
+        ("Battery Scenarios Evaluated", battery_config_page_count),
+        *[(section_title, count) for (section_title, _, _), count in zip(section_specs, section_page_counts)],
+        ("Sizing KPI Summary (Decision Matrix)", kpi_summary_page_count),
+        ("Final Recommended Configuration", len(recommendation_pages) + recommendation_graph_page_count),
+        ("Detailed KPI Appendix", len(kpi_appendix_pages)),
+        ("Data Requirements & Assumptions", len(data_requirements_pages)),
         ("License", len(license_pages)),
     ]
 
@@ -2123,10 +2123,19 @@ def build_pdf(
             )
             page_index += 1
 
-        for i, page_lines in enumerate(recommendation_pages):
+        if input_data_summary:
+            draw_input_data_page(
+                pdf=pdf,
+                summary=input_data_summary,
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(methodology_pages):
             draw_structured_text_page(
                 pdf=pdf,
-                title="AI Recommendation",
+                title="Simulation Methodology",
                 page_lines=page_lines,
                 is_continuation=(i > 0),
                 page_index=page_index,
@@ -2134,29 +2143,21 @@ def build_pdf(
             )
             page_index += 1
 
-        for page_images in chunked(recommendation_graph_images, 1):
-            draw_image_page(
+        for config_chunk in chunked(energy_tariff_configuration_rows, 2):
+            draw_config_cards_page(
                 pdf=pdf,
-                section_title="AI Recommendation",
-                images=page_images,
+                section_title="Tariff Model Configuration",
+                rows=config_chunk,
                 page_index=page_index,
                 total_pages=total_pages,
             )
             page_index += 1
 
-        if kpi_summary_page_count > 0:
-            draw_kpi_summary_compact_page(
+        for config_chunk in chunked(battery_configuration_rows, 2):
+            draw_config_cards_page(
                 pdf=pdf,
-                kpi_summary_text=kpi_summary_text,
-                page_index=page_index,
-                total_pages=total_pages,
-            )
-            page_index += 1
-
-        if input_data_summary:
-            draw_input_data_page(
-                pdf=pdf,
-                summary=input_data_summary,
+                section_title="Battery Scenarios Evaluated",
+                rows=config_chunk,
                 page_index=page_index,
                 total_pages=total_pages,
             )
@@ -2175,11 +2176,41 @@ def build_pdf(
                 )
                 page_index += 1
 
-        for i, page_lines in enumerate(methodology_pages):
+        if kpi_summary_page_count > 0:
+            draw_kpi_summary_compact_page(
+                pdf=pdf,
+                kpi_summary_text=kpi_summary_text,
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(recommendation_pages):
             draw_structured_text_page(
                 pdf=pdf,
-                title="Simulation Methodology",
+                title="Final Recommended Configuration",
                 page_lines=page_lines,
+                is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for page_images in chunked(recommendation_graph_images, 1):
+            draw_image_page(
+                pdf=pdf,
+                section_title="Final Recommended Configuration",
+                images=page_images,
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for i, page_lines in enumerate(kpi_appendix_pages):
+            draw_markdown_blocks_page(
+                pdf=pdf,
+                title="Detailed KPI Appendix",
+                page_blocks=page_lines,
                 is_continuation=(i > 0),
                 page_index=page_index,
                 total_pages=total_pages,
@@ -2189,39 +2220,8 @@ def build_pdf(
         for i, page_lines in enumerate(data_requirements_pages):
             draw_structured_text_page(
                 pdf=pdf,
-                title="Data Requirements",
+                title="Data Requirements & Assumptions",
                 page_lines=page_lines,
-                is_continuation=(i > 0),
-                page_index=page_index,
-                total_pages=total_pages,
-            )
-            page_index += 1
-
-        for config_chunk in chunked(battery_configuration_rows, 2):
-            draw_config_cards_page(
-                pdf=pdf,
-                section_title="Battery Configuration Used",
-                rows=config_chunk,
-                page_index=page_index,
-                total_pages=total_pages,
-            )
-            page_index += 1
-
-        for config_chunk in chunked(energy_tariff_configuration_rows, 2):
-            draw_config_cards_page(
-                pdf=pdf,
-                section_title="Energy Tariff Configuration Used",
-                rows=config_chunk,
-                page_index=page_index,
-                total_pages=total_pages,
-            )
-            page_index += 1
-
-        for i, page_lines in enumerate(kpi_appendix_pages):
-            draw_markdown_blocks_page(
-                pdf=pdf,
-                title="KPI Appendix",
-                page_blocks=page_lines,
                 is_continuation=(i > 0),
                 page_index=page_index,
                 total_pages=total_pages,
@@ -2326,14 +2326,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional KPI summary markdown file to embed in the PDF as a compact KPI Summary "
-            "section plus a full KPI Appendix (for example out/kpi_summary/kpi_summary.md)."
+            "section plus a full Detailed KPI Appendix (for example out/kpi_summary/kpi_summary.md)."
         ),
     )
     parser.add_argument(
         "--recommendation-graph-image",
         default="out/kpi_images/01_graph_kpi_consensus_best_battery.png",
         help=(
-            "Optional KPI recommendation graph image to embed in the AI Recommendation "
+            "Optional KPI recommendation graph image to embed in the Final Recommended Configuration "
             "section (default: out/kpi_images/01_graph_kpi_consensus_best_battery.png)."
         ),
     )
