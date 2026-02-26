@@ -21,50 +21,6 @@ from typing import Any
 SEASON_ORDER = ["spring", "summer", "autumn", "winter"]
 
 
-DEFAULT_KPI_CONFIG: dict[str, Any] = {
-    "thresholds": {
-        "graph_kpis": {
-            "global_energy_reduction_kwh": {
-                "consumed_reduction_increment_pct_points_min": 10.0,
-            },
-            "global_energy_financial_impact_chf": {
-                "bill_offset_increment_pct_points_min": 10.0,
-            },
-            "global_rentability_overview": {
-                "amortization_years_max": 8.0,
-            },
-            "global_battery_utilization": {
-                "pct_max_cycles_per_year_max": 4.0,
-            },
-            "global_battery_status_heatmap": {
-                "empty_pct_max": 20.0,
-            },
-            "seasonal_power_saturation_at_max_limit": {
-                "power_saturation_pct_any_season_max": 10.0,
-            },
-            "monthly_structural_evening_energy_undersizing_peak_period": {
-                "evening_undersize_pct_per_month_max": 40.0,
-                "max_months_above_threshold": 1,
-            },
-        },
-    },
-}
-
-
-def deep_copy_jsonable(obj: Any) -> Any:
-    return json.loads(json.dumps(obj))
-
-
-def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = deep_copy_jsonable(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = deep_merge_dicts(merged[key], value)  # type: ignore[arg-type]
-        else:
-            merged[key] = value
-    return merged
-
-
 def clamp_fraction(value: Any, *, default: float) -> float:
     v = safe_float(value)
     if v is None:
@@ -92,21 +48,19 @@ def nonnegative_int_or_default(value: Any, *, default: int) -> int:
 
 def load_kpi_config(config_path: Path | None) -> tuple[dict[str, Any], str]:
     """
-    Load KPI tuning config from JSON and merge onto defaults.
-    Returns (config, source_label).
+    Load KPI tuning config from JSON.
+    The config file is mandatory.
     """
-    cfg = deep_copy_jsonable(DEFAULT_KPI_CONFIG)
     if config_path is None:
-        return cfg, "built-in defaults"
+        raise ValueError("KPI config path is required (use --config).")
 
     if not config_path.exists() or not config_path.is_file():
-        return cfg, f"built-in defaults (config not found: {config_path})"
+        raise FileNotFoundError(f"KPI config file not found: {config_path}")
 
     loaded = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError(f"KPI config must be a JSON object: {config_path}")
-    cfg = deep_merge_dicts(cfg, loaded)
-    return cfg, str(config_path)
+    return loaded, str(config_path)
 
 
 def build_decision_profiles_from_config(kpi_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -151,8 +105,7 @@ def build_decision_profiles_from_config(kpi_config: dict[str, Any]) -> dict[str,
     if profiles:
         return profiles
 
-    # Safety fallback to defaults if user config zeroed everything out.
-    return build_decision_profiles_from_config(deep_copy_jsonable(DEFAULT_KPI_CONFIG))
+    return {}
 
 
 def resolve_kpi_settings(
@@ -2304,7 +2257,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         default="config/kpi_scoring.json",
-        help="Optional KPI tuning config JSON (default: config/kpi_scoring.json, falls back to built-in defaults if missing).",
+        help="KPI tuning config JSON path (default: config/kpi_scoring.json). File is required.",
     )
     parser.add_argument(
         "--simulation-jsons",

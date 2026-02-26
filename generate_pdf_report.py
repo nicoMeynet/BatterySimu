@@ -8,7 +8,7 @@ Example:
     --monthly out/graphs/monthly/*.png \
     --seasonal out/graphs/seasonal/*.png \
     --output out/battery_graph_report.pdf \
-    --title "Battery Simulation Graph Report"
+    --title "Residential Battery Sizing & Performance Analysis"
 """
 
 from __future__ import annotations
@@ -198,7 +198,7 @@ def extract_config_payload(data: dict) -> dict:
 
 
 def load_battery_configuration_rows(config_paths: list[Path]) -> list[dict]:
-    rows = []
+    sortable_rows: list[tuple[tuple[int, float, str], dict]] = []
     for path in sorted(config_paths):
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
@@ -207,34 +207,37 @@ def load_battery_configuration_rows(config_paths: list[Path]) -> list[dict]:
         battery = cfg["battery"]
         capacity_per_phase = battery.get("capacity_Wh_per_phase", [0, 0, 0])
         total_kwh = sum(capacity_per_phase) / 1000 if capacity_per_phase else 0
+        scenario = path.stem.replace("config_", "")
+        scenario_lc = scenario.lower()
+        is_no_battery = "nobattery" in scenario_lc or total_kwh == 0
 
-        rows.append(
-            {
-                "scenario": path.stem.replace("config_", ""),
-                "fields": [
-                    ("Capacity / phase (Wh)", "/".join(str(x) for x in capacity_per_phase)),
-                    ("Total capacity (kWh)", f"{total_kwh:.2f}"),
-                    ("Battery cost (CHF)", str(battery.get("cost_chf", "-"))),
+        row = {
+            "scenario": scenario,
+            "fields": [
+                ("Capacity / phase (Wh)", "/".join(str(x) for x in capacity_per_phase)),
+                ("Total capacity (kWh)", f"{total_kwh:.2f}"),
+                ("Battery cost (CHF)", str(battery.get("cost_chf", "-"))),
+                (
+                    "Charge / discharge power (W)",
                     (
-                        "Charge / discharge power (W)",
-                        (
-                            f"{normalize_power(battery.get('max_charge_power_watts'))} / "
-                            f"{normalize_power(battery.get('max_discharge_power_watts'))}"
-                        ),
+                        f"{normalize_power(battery.get('max_charge_power_watts'))} / "
+                        f"{normalize_power(battery.get('max_discharge_power_watts'))}"
                     ),
+                ),
+                (
+                    "Charge / discharge efficiency",
                     (
-                        "Charge / discharge efficiency",
-                        (
-                            f"{battery.get('charge_efficiency', '-')} / "
-                            f"{battery.get('discharge_efficiency', '-')}"
-                        ),
+                        f"{battery.get('charge_efficiency', '-')} / "
+                        f"{battery.get('discharge_efficiency', '-')}"
                     ),
-                    ("SOC min / max (%)", f"{battery.get('soc_min_pct', '-')} / {battery.get('soc_max_pct', '-')}"),
-                    ("Max cycles", str(battery.get("max_cycles", "-"))),
-                ],
-            }
-        )
-    return rows
+                ),
+                ("SOC min / max (%)", f"{battery.get('soc_min_pct', '-')} / {battery.get('soc_max_pct', '-')}"),
+                ("Max cycles", str(battery.get("max_cycles", "-"))),
+            ],
+        }
+        sort_key = (0 if is_no_battery else 1, float(total_kwh), scenario_lc)
+        sortable_rows.append((sort_key, row))
+    return [row for _sort_key, row in sorted(sortable_rows, key=lambda item: item[0])]
 
 
 def load_energy_tariff_configuration_rows(config_paths: list[Path]) -> list[dict]:
@@ -318,20 +321,32 @@ def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off")
 
+    cover_title = title
+    if title.strip() == "Residential Battery Sizing & Performance Analysis":
+        cover_title = "Residential Battery Sizing\n&\nPerformance Analysis"
+
+    title_line_count = cover_title.count("\n") + 1
+    multiline_title = title_line_count > 1
+    title_y = 0.79 if multiline_title else 0.75
+    subtitle_y = 0.64 if multiline_title else 0.69
+    generated_y = 0.58 if multiline_title else 0.63
+    divider_y = 0.56 if multiline_title else 0.61
+
     ax.text(
         0.5,
-        0.75,
-        title,
+        title_y,
+        cover_title,
         ha="center",
         va="center",
-        fontsize=28,
+        fontsize=26 if title_line_count >= 3 else 28,
         fontweight="bold",
         color="#1f2937",
+        linespacing=1.15,
     )
     if subtitle:
         ax.text(
             0.5,
-            0.69,
+            subtitle_y,
             subtitle,
             ha="center",
             va="center",
@@ -342,7 +357,7 @@ def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     ax.text(
         0.5,
-        0.63,
+        generated_y,
         f"Generated on {generated}",
         ha="center",
         va="center",
@@ -352,7 +367,7 @@ def draw_cover(pdf: PdfPages, title: str, subtitle: str | None) -> None:
 
     ax.add_patch(
         plt.Rectangle(
-            (0.15, 0.61),
+            (0.15, divider_y),
             0.70,
             0.002,
             transform=ax.transAxes,
@@ -1141,12 +1156,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--title",
-        default="Battery Simulation Graph Report",
+        default="Residential Battery Sizing & Performance Analysis",
         help="Report title on the cover page.",
     )
     parser.add_argument(
         "--subtitle",
-        default="Monthly and seasonal comparison charts",
+        default="Data-Driven Financial, Structural and Seasonal Evaluation",
         help="Optional subtitle on the cover page.",
     )
     parser.add_argument(
