@@ -15,6 +15,8 @@ PDF_REPORT_INTRO ?= This report evaluates multiple residential battery configura
 MONTH_NOTEBOOK ?= battery_comparison_month.ipynb
 SEASON_NOTEBOOK ?= battery_comparison_season.ipynb
 GLOBAL_NOTEBOOK ?= battery_comparison_global.ipynb
+KPI_NOTEBOOK ?= battery_kpi_recommendation.ipynb
+KPI_GRAPHS_DIR ?= out/kpi_images
 NOTEBOOK_TIMEOUT ?= -1
 NOTEBOOK_MPLCONFIGDIR ?= /tmp/matplotlib
 RECOMMEND_INPUT_PDF ?= out/battery_graph_report.pdf
@@ -49,6 +51,7 @@ OLLAMA_TEMPERATURE ?= 0.2
 OLLAMA_TOP_P ?= 0.9
 OLLAMA_NUM_CTX ?= 8192
 RECOMMENDATION_FILE ?= out/simulation_llm_recommendation/recommendation_ollama.md
+KPI_RECOMMENDATION_GRAPH_IMAGE ?= out/kpi_images/01_graph_kpi_consensus_best_battery.png
 KPI_SUMMARY_JSON ?= out/kpi_summary/kpi_summary.json
 KPI_SUMMARY_MD ?= out/kpi_summary/kpi_summary.md
 KPI_MARGINAL_GAIN_THRESHOLD ?=
@@ -152,11 +155,12 @@ run_notebooks:
 		echo "Install it with: $(VENV_DIR)/bin/python -m pip install nbconvert"; \
 		exit 1; \
 	}
-	@echo "Cleaning previous exported graph images (month/season/global)..."
-	@mkdir -p "$(MONTHLY_GRAPHS_DIR)" "$(SEASONAL_GRAPHS_DIR)" "$(GLOBAL_GRAPHS_DIR)"
+	@echo "Cleaning previous exported graph images (month/season/global/kpi)..."
+	@mkdir -p "$(MONTHLY_GRAPHS_DIR)" "$(SEASONAL_GRAPHS_DIR)" "$(GLOBAL_GRAPHS_DIR)" "$(KPI_GRAPHS_DIR)"
 	@find "$(MONTHLY_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
 	@find "$(SEASONAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
 	@find "$(GLOBAL_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
+	@find "$(KPI_GRAPHS_DIR)" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.svg' \) -delete
 	@mkdir -p "$(NOTEBOOK_MPLCONFIGDIR)"
 	@MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m nbconvert \
 		--to notebook \
@@ -179,6 +183,16 @@ run_notebooks:
 			"$(GLOBAL_NOTEBOOK)"; \
 	else \
 		echo "Global notebook not found: $(GLOBAL_NOTEBOOK) (skipping)."; \
+	fi
+	@if [ -f "$(KPI_NOTEBOOK)" ]; then \
+		MPLCONFIGDIR="$(NOTEBOOK_MPLCONFIGDIR)" $(VENV_DIR)/bin/python -m nbconvert \
+			--to notebook \
+			--execute \
+			--inplace \
+			--ExecutePreprocessor.timeout=$(NOTEBOOK_TIMEOUT) \
+			"$(KPI_NOTEBOOK)"; \
+	else \
+		echo "KPI notebook not found: $(KPI_NOTEBOOK) (skipping)."; \
 	fi
 
 .PHONY: pdf_report
@@ -232,9 +246,17 @@ pdf_report:
 	else \
 		echo "AI recommendation file not found: $(RECOMMENDATION_FILE) (continuing without recommendation section)."; \
 	fi; \
+	recommendation_graph_arg=""; \
+	if [ -f "$(KPI_RECOMMENDATION_GRAPH_IMAGE)" ]; then \
+		echo "Including AI recommendation graph from $(KPI_RECOMMENDATION_GRAPH_IMAGE)"; \
+		recommendation_graph_arg="$(KPI_RECOMMENDATION_GRAPH_IMAGE)"; \
+	else \
+		echo "AI recommendation graph not found: $(KPI_RECOMMENDATION_GRAPH_IMAGE) (continuing without recommendation graph)."; \
+	fi; \
 	$(VENV_DIR)/bin/python generate_pdf_report.py \
 		$$global_args \
 		$${recommendation_file_arg:+--recommendation-file "$$recommendation_file_arg"} \
+		$${recommendation_graph_arg:+--recommendation-graph-image "$$recommendation_graph_arg"} \
 		--configs $(CONFIGS) \
 		--simulation-jsons $(SIMULATION_JSONS) \
 		--monthly $$monthly_files \

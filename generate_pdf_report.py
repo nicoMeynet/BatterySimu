@@ -948,6 +948,7 @@ def build_pdf(
     scope_text: str,
     data_requirements_text: str,
     recommendation_text: str,
+    recommendation_graph_images: list[Path],
     license_text: str,
     input_data_summary: dict | None,
     battery_configuration_rows: list[dict],
@@ -974,6 +975,7 @@ def build_pdf(
         if recommendation_text.strip()
         else []
     )
+    recommendation_graph_page_count = len(list(chunked(recommendation_graph_images, 1))) if recommendation_graph_images else 0
     license_pages = (
         paginate_structured_lines(parse_structured_text(license_text))
         if license_text.strip()
@@ -989,7 +991,7 @@ def build_pdf(
     chapter_counts = [
         ("Introduction", len(intro_pages)),
         ("Report Scope", len(scope_pages)),
-        ("AI Recommendation", len(recommendation_pages)),
+        ("AI Recommendation", len(recommendation_pages) + recommendation_graph_page_count),
         ("Input Data Ingested", input_data_page_count),
         *[(section_title, count) for (section_title, _, _), count in zip(section_specs, section_page_counts)],
         ("Simulation Methodology", len(methodology_pages)),
@@ -1045,6 +1047,16 @@ def build_pdf(
                 title="AI Recommendation",
                 page_lines=page_lines,
                 is_continuation=(i > 0),
+                page_index=page_index,
+                total_pages=total_pages,
+            )
+            page_index += 1
+
+        for page_images in chunked(recommendation_graph_images, 1):
+            draw_image_page(
+                pdf=pdf,
+                section_title="AI Recommendation",
+                images=page_images,
                 page_index=page_index,
                 total_pages=total_pages,
             )
@@ -1208,6 +1220,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--recommendation-graph-image",
+        default="out/kpi_images/01_graph_kpi_consensus_best_battery.png",
+        help=(
+            "Optional KPI recommendation graph image to embed in the AI Recommendation "
+            "section (default: out/kpi_images/01_graph_kpi_consensus_best_battery.png)."
+        ),
+    )
+    parser.add_argument(
         "--license-file",
         default="LICENSE",
         help=(
@@ -1244,6 +1264,14 @@ def main() -> None:
                 print(f"AI recommendation file is empty, skipping: {rec_path}")
         else:
             print(f"AI recommendation file not found, skipping: {rec_path}")
+    recommendation_graph_images: list[Path] = []
+    if args.recommendation_graph_image:
+        rec_graph_path = Path(args.recommendation_graph_image)
+        if rec_graph_path.exists() and rec_graph_path.is_file():
+            recommendation_graph_images = validate_images([str(rec_graph_path)], "AI recommendation graph")
+            print(f"Loaded AI recommendation graph: {rec_graph_path}")
+        else:
+            print(f"AI recommendation graph not found, skipping: {rec_graph_path}")
     license_text = ""
     if args.license_file:
         license_path = Path(args.license_file)
@@ -1266,6 +1294,7 @@ def main() -> None:
         scope_text=args.scope,
         data_requirements_text=args.data_requirements,
         recommendation_text=recommendation_text,
+        recommendation_graph_images=recommendation_graph_images,
         license_text=license_text,
         input_data_summary=input_data_summary,
         battery_configuration_rows=battery_configuration_rows,
