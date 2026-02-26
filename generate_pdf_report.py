@@ -994,6 +994,28 @@ def _table_column_width_fractions(headers: list[str], rows: list[list[str]]) -> 
     return [f / total for f in fracs]
 
 
+def _known_table_column_fracs(headers: list[str]) -> list[float] | None:
+    """Provide stable column widths for known appendix/KPI tables with problematic headers."""
+    normalized = [" ".join(str(h or "").lower().split()) for h in headers]
+
+    # KPI Appendix: Monthly Structural Evening Energy Undersizing Peak Period table
+    # | Battery Size (kWh) | Scenario | Months > Threshold | Worst Month (%) | Violating Months | Status |
+    monthly_evening_undersize_headers = [
+        "battery size (kwh)",
+        "scenario",
+        "months > threshold",
+        "worst month (%)",
+        "violating months",
+        "status",
+    ]
+    if normalized == monthly_evening_undersize_headers:
+        # Reserve enough width for the two numeric threshold headers while keeping
+        # the long "Violating Months" column dominant and "Status" readable.
+        return [0.10, 0.17, 0.11, 0.10, 0.33, 0.19]
+
+    return None
+
+
 def _wrap_table_cell_lines(text: str, char_cap: int) -> list[str]:
     value = "" if text is None else str(text)
     if not value:
@@ -1025,7 +1047,29 @@ def _measure_markdown_table_block(block: dict, total_width: float = 0.84) -> dic
             "alignments": alignments,
         }
 
-    column_fracs = _table_column_width_fractions(headers, rows)
+    column_fracs: list[float]
+    raw_column_fracs = block.get("column_fracs")
+    if isinstance(raw_column_fracs, (list, tuple)) and len(raw_column_fracs) == len(headers):
+        parsed_fracs: list[float] = []
+        valid_fracs = True
+        for value in raw_column_fracs:
+            try:
+                frac = float(value)
+            except (TypeError, ValueError):
+                valid_fracs = False
+                break
+            if frac <= 0:
+                valid_fracs = False
+                break
+            parsed_fracs.append(frac)
+        total_frac = sum(parsed_fracs)
+        if valid_fracs and total_frac > 0:
+            column_fracs = [f / total_frac for f in parsed_fracs]
+        else:
+            column_fracs = _table_column_width_fractions(headers, rows)
+    else:
+        known_fracs = _known_table_column_fracs(headers)
+        column_fracs = known_fracs if known_fracs else _table_column_width_fractions(headers, rows)
     # Approx char capacity for wrapped text, tuned for A4 page width and font sizes used below.
     # Use conservative wrap widths so text stays inside cells on the PDF page.
     char_caps = [max(5, int(frac * 96)) for frac in column_fracs]
@@ -2042,11 +2086,13 @@ def draw_kpi_summary_compact_page(
             row = idx // 2
             x = mx + col * 0.43
             y = my - row * 0.031
+            label_col_right = x + (0.16 if col == 1 else 0.11)
+            value_col_left = label_col_right + 0.01
             ax.text(
-                x,
+                label_col_right,
                 y,
                 f"{label}:",
-                ha="left",
+                ha="right",
                 va="center",
                 fontsize=9.1,
                 fontweight="bold",
@@ -2054,9 +2100,9 @@ def draw_kpi_summary_compact_page(
                 transform=ax.transAxes,
             )
             ax.text(
-                x + 0.11,
+                value_col_left,
                 y,
-                textwrap.shorten(str(value), width=44, placeholder="..."),
+                textwrap.shorten(str(value), width=(34 if col == 1 else 36), placeholder="..."),
                 ha="left",
                 va="center",
                 fontsize=9.1,
@@ -2083,8 +2129,9 @@ def draw_kpi_summary_compact_page(
 
         table_block = {
             "kind": "table",
-            "headers": ["Graph KPI", "Type", "Recommended", "Scenario", "Threshold"],
+            "headers": ["Graph KPI", "Type", "Recommended\nSize", "Scenario\nID", "Rule / Threshold"],
             "alignments": ["left", "center", "center", "left", "left"],
+            "column_fracs": [0.28, 0.12, 0.13, 0.22, 0.25],
             "rows": table_rows,
         }
 
