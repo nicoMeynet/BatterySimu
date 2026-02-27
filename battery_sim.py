@@ -9,7 +9,6 @@ parameters. The script also calculates the financial impact of using the battery
 import argparse
 import pandas as pd
 import sys
-from tabulate import tabulate
 import json
 import hashlib
 from datetime import datetime, UTC
@@ -68,14 +67,6 @@ def get_current_tariff_price(tariff_mode, action):
 def calculate_energy_Wh(power_watts, duration_minutes):
     """Convert power over a duration in minutes to energy in Wh."""
     return power_watts * duration_minutes / 60
-
-# ---- Update the consumed or injected energy for a given phase and tariff mode ----
-def update_energy(energy, tariff_mode, consumed_dict, injected_dict, phase):
-    """Accumulate consumed or injected energy for one phase and tariff mode."""
-    if energy < 0:
-        injected_dict[phase][tariff_mode] += abs(energy)
-    else:
-        consumed_dict[phase][tariff_mode] += energy
 
 # ---- Simulation ----
 def simulate_battery_behavior(house_grid_power_watts):
@@ -720,10 +711,6 @@ def compute_battery_utilization(cycles, duration_days, max_cycles):
             "expected_life_years": expected_life_years
         }
     }
-
-def empty_energy_dict():
-    """Create a zero-initialized energy accumulator by phase and tariff mode."""
-    return {p: {"HP": 0, "HC": 0} for p in PHASE_KEYS}
 
 def round_value(x, digits=2, eps=1e-2):
     """Round numeric values and normalize near-zero noise to 0.0."""
@@ -1741,12 +1728,6 @@ print("Starting simulation...")
 results = []
 battery_cycle_total = {p: 0.0 for p in PHASE_KEYS}
 
-# Initialize dictionaries to store injected and consumed energy for each phase and tariff mode
-simulated_injected_energy_Wh = empty_energy_dict()
-simulated_consumed_energy_Wh = empty_energy_dict()
-current_injected_energy_Wh = empty_energy_dict()
-current_consumed_energy_Wh = empty_energy_dict()
-
 total_steps = len(merged_data)
 
 for i in range(total_steps):
@@ -1779,25 +1760,6 @@ for i in range(total_steps):
     battery_cycle_total["A"] += sim_result["A"]["battery_cycle"]
     battery_cycle_total["B"] += sim_result["B"]["battery_cycle"]
     battery_cycle_total["C"] += sim_result["C"]["battery_cycle"]
-
-    # List of phases and tariff modes
-    phases = PHASE_KEYS
-
-    # Process real energy consumption
-    for phase, energy in zip(phases, [
-        energy_house_consumption_Wh_phase_a,
-        energy_house_consumption_Wh_phase_b,
-        energy_house_consumption_Wh_phase_c
-    ]):
-        update_energy(energy, tariff_mode, current_consumed_energy_Wh, current_injected_energy_Wh, phase)
-
-    # Process simulated energy consumption
-    for phase, energy in zip(phases, [
-        simulated_energy_house_consumption_Wh_phase_a,
-        simulated_energy_house_consumption_Wh_phase_b,
-        simulated_energy_house_consumption_Wh_phase_c
-    ]):
-        update_energy(energy, tariff_mode, simulated_consumed_energy_Wh, simulated_injected_energy_Wh, phase)
 
     # Export all info in a csv file
     results.append({
@@ -1851,246 +1813,6 @@ results_df = pd.DataFrame(results)
 # DAILY BATTERY SIZING SCORE
 # ===============================
 results_df["date"] = results_df["timestamp"].dt.date
-
-daily_scores = []
-
-for day, df_day in results_df.groupby("date"):
-    score = compute_battery_sizing_score(
-        df_day,
-        battery_capacity_total_kwh
-    )
-    daily_scores.append({
-        "date": str(day),
-        "battery_sizing_score_raw": score
-    })
-
-daily_sizing_df = pd.DataFrame(daily_scores)
-
-print("**********************************")
-print("******* Simulation results *******")
-print("**********************************")
-# Data for injected energy
-data_injected = [
-    ["Phase A Injected Off-Peak", int(current_injected_energy_Wh['A']['HC'] / 1000), int(simulated_injected_energy_Wh['A']['HC'] / 1000), int((simulated_injected_energy_Wh['A']['HC'] - current_injected_energy_Wh['A']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['A']['HC'] - current_injected_energy_Wh['A']['HC']) / 1000 * (-1))],
-    ["Phase A Injected Peak", int(current_injected_energy_Wh['A']['HP'] / 1000), int(simulated_injected_energy_Wh['A']['HP'] / 1000), int((simulated_injected_energy_Wh['A']['HP'] - current_injected_energy_Wh['A']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['A']['HP'] - current_injected_energy_Wh['A']['HP']) / 1000 * (-1))],
-    ["Phase B Injected Off-Peak", int(current_injected_energy_Wh['B']['HC'] / 1000), int(simulated_injected_energy_Wh['B']['HC'] / 1000), int((simulated_injected_energy_Wh['B']['HC'] - current_injected_energy_Wh['B']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['B']['HC'] - current_injected_energy_Wh['B']['HC']) / 1000 * (-1))],
-    ["Phase B Injected Peak", int(current_injected_energy_Wh['B']['HP'] / 1000), int(simulated_injected_energy_Wh['B']['HP'] / 1000), int((simulated_injected_energy_Wh['B']['HP'] - current_injected_energy_Wh['B']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['B']['HP'] - current_injected_energy_Wh['B']['HP']) / 1000 * (-1))],
-    ["Phase C Injected Off-Peak", int(current_injected_energy_Wh['C']['HC'] / 1000), int(simulated_injected_energy_Wh['C']['HC'] / 1000), int((simulated_injected_energy_Wh['C']['HC'] - current_injected_energy_Wh['C']['HC']) / 1000), int(get_current_tariff_price("HC", "inject") * abs(simulated_injected_energy_Wh['C']['HC'] - current_injected_energy_Wh['C']['HC']) / 1000 * (-1))],
-    ["Phase C Injected Peak", int(current_injected_energy_Wh['C']['HP'] / 1000), int(simulated_injected_energy_Wh['C']['HP'] / 1000), int((simulated_injected_energy_Wh['C']['HP'] - current_injected_energy_Wh['C']['HP']) / 1000), int(get_current_tariff_price("HP", "inject") * abs(simulated_injected_energy_Wh['C']['HP'] - current_injected_energy_Wh['C']['HP']) / 1000 * (-1))]
-]
-
-# Data for consumed energy
-data_consumed = [
-    ["Phase A Consumed Off-Peak", int(current_consumed_energy_Wh['A']['HC'] / 1000), int(simulated_consumed_energy_Wh['A']['HC'] / 1000), int((simulated_consumed_energy_Wh['A']['HC'] - current_consumed_energy_Wh['A']['HC']) / 1000), int(get_current_tariff_price("HC", "consume") * abs(simulated_consumed_energy_Wh['A']['HC'] - current_consumed_energy_Wh['A']['HC']) / 1000)],
-    ["Phase A Consumed Peak", int(current_consumed_energy_Wh['A']['HP'] / 1000), int(simulated_consumed_energy_Wh['A']['HP'] / 1000), int((simulated_consumed_energy_Wh['A']['HP'] - current_consumed_energy_Wh['A']['HP']) / 1000), int(get_current_tariff_price("HP", "consume") * abs(simulated_consumed_energy_Wh['A']['HP'] - current_consumed_energy_Wh['A']['HP']) / 1000)],
-    ["Phase B Consumed Off-Peak", int(current_consumed_energy_Wh['B']['HC'] / 1000), int(simulated_consumed_energy_Wh['B']['HC'] / 1000), int((simulated_consumed_energy_Wh['B']['HC'] - current_consumed_energy_Wh['B']['HC']) / 1000), int(get_current_tariff_price("HC", "consume") * abs(simulated_consumed_energy_Wh['B']['HC'] - current_consumed_energy_Wh['B']['HC']) / 1000)],
-    ["Phase B Consumed Peak", int(current_consumed_energy_Wh['B']['HP'] / 1000), int(simulated_consumed_energy_Wh['B']['HP'] / 1000), int((simulated_consumed_energy_Wh['B']['HP'] - current_consumed_energy_Wh['B']['HP']) / 1000), int(get_current_tariff_price("HP", "consume") * abs(simulated_consumed_energy_Wh['B']['HP'] - current_consumed_energy_Wh['B']['HP']) / 1000)],
-    ["Phase C Consumed Off-Peak", int(current_consumed_energy_Wh['C']['HC'] / 1000), int(simulated_consumed_energy_Wh['C']['HC'] / 1000), int((simulated_consumed_energy_Wh['C']['HC'] - current_consumed_energy_Wh['C']['HC']) / 1000), int(get_current_tariff_price("HC", "consume") * abs(simulated_consumed_energy_Wh['C']['HC'] - current_consumed_energy_Wh['C']['HC']) / 1000)],
-    ["Phase C Consumed Peak", int(current_consumed_energy_Wh['C']['HP'] / 1000), int(simulated_consumed_energy_Wh['C']['HP'] / 1000), int((simulated_consumed_energy_Wh['C']['HP'] - current_consumed_energy_Wh['C']['HP']) / 1000), int(get_current_tariff_price("HP", "consume") * abs(simulated_consumed_energy_Wh['C']['HP'] - current_consumed_energy_Wh['C']['HP']) / 1000)]
-]
-
-# Calculate totals for each column
-totals_injected = ["Total Injected", sum(row[1] for row in data_injected), sum(row[2] for row in data_injected), sum(row[3] for row in data_injected), sum(row[4] for row in data_injected)]
-totals_consumed = ["Total Consumed", sum(row[1] for row in data_consumed), sum(row[2] for row in data_consumed), sum(row[3] for row in data_consumed), sum(row[4] for row in data_consumed)]
-total_gain_CHF = totals_injected[4] + totals_consumed[4]
-
-headers = ["Phase", "Without Battery (kWh)", "With Battery (kWh)", "Delta (kWh)", "Delta (CHF)"]
-
-print("Injected Energy:")
-print("The table below shows the energy injected into the grid.") 
-print("Adding a battery will reduce the amount of energy injected into the grid, as surplus energy will be stored in the battery rather than returned to the grid.")
-print(tabulate(data_injected + [totals_injected], headers, tablefmt="grid"))
-
-print("")
-print("Consumed Energy:")
-print("The table below shows the energy consumed from the grid.")
-print("Adding a battery is expected to reduce the amount of energy consumed from the grid.")
-print(tabulate(data_consumed + [totals_consumed], headers, tablefmt="grid"))
-
-print("")
-print("Rentability:")
-days_int = int(duration_days_global)
-print(
-    f"+ Total gain: {total_gain_CHF} CHF over {days_int} calendar days "
-    f"(≈ {total_gain_CHF / duration_days_global * 365:.0f} CHF/year)"
-)
-
-if total_gain_CHF > 0:
-    print(
-        f"+ Amortization time: "
-        f"{battery_cost / total_gain_CHF * duration_days_global / 365:.2f} years "
-        f"if the cost of the battery is {battery_cost} CHF"
-    )
-else:
-    print("+ Amortization time: not applicable (no financial gain)")
-
-
-print("")
-# Battery statistics
-def expected_life(cycles):
-    """Estimate battery life in years from measured cycles over simulated duration."""
-    return (
-        int(battery_max_cycles / cycles * duration_days_global / 365)
-        if cycles > 0
-        else None
-    )
-
-battery_stats_data = [
-    ["Cycles",
-     int(battery_cycle_total['A']),
-     int(battery_cycle_total['B']),
-     int(battery_cycle_total['C']),
-     battery_max_cycles
-    ],
-    ["Expected life (years)",
-     expected_life(battery_cycle_total['A']),
-     expected_life(battery_cycle_total['B']),
-     expected_life(battery_cycle_total['C']),
-     ""
-    ],
-    ["Remaining energy (Wh)",
-     int(energy_in_battery_Wh[0]),
-     int(energy_in_battery_Wh[1]),
-     int(energy_in_battery_Wh[2]),
-     ""
-    ]
-]
-
-headers = ["Metric", "Phase 1", "Phase 2", "Phase 3", "Max/Config"]
-
-print("Battery Statistics:")
-print("This is the statistics for the battery indicating the number of cycles, the expected life, and the remaining energy.")
-print("If the cycles between the phases are different, it means that the battery is not used equally.")
-print(tabulate(battery_stats_data, headers, tablefmt="grid"))
-
-
-# Calculate the number of entries in results with battery status "full" or "empty"
-battery_status_full_phase_A = results_df[results_df["battery_status_phase_A"] == "full"].shape[0]
-battery_status_full_phase_B = results_df[results_df["battery_status_phase_B"] == "full"].shape[0]
-battery_status_full_phase_C = results_df[results_df["battery_status_phase_C"] == "full"].shape[0]
-battery_status_empty_phase_A = results_df[results_df["battery_status_phase_A"] == "empty"].shape[0]
-battery_status_empty_phase_B = results_df[results_df["battery_status_phase_B"] == "empty"].shape[0]
-battery_status_empty_phase_C = results_df[results_df["battery_status_phase_C"] == "empty"].shape[0]
-battery_status_discharging_phase_A = results_df[results_df["battery_status_phase_A"] == "discharging"].shape[0]
-battery_status_discharging_phase_B = results_df[results_df["battery_status_phase_B"] == "discharging"].shape[0]
-battery_status_discharging_phase_C = results_df[results_df["battery_status_phase_C"] == "discharging"].shape[0]
-battery_status_charging_phase_A = results_df[results_df["battery_status_phase_A"] == "charging"].shape[0]
-battery_status_charging_phase_B = results_df[results_df["battery_status_phase_B"] == "charging"].shape[0]
-battery_status_charging_phase_C = results_df[results_df["battery_status_phase_C"] == "charging"].shape[0]
-battery_status_phase_A_total = battery_status_full_phase_A + battery_status_empty_phase_A + battery_status_discharging_phase_A + battery_status_charging_phase_A
-battery_status_phase_B_total = battery_status_full_phase_B + battery_status_empty_phase_B + battery_status_discharging_phase_B + battery_status_charging_phase_B
-battery_status_phase_C_total = battery_status_full_phase_C + battery_status_empty_phase_C + battery_status_discharging_phase_C + battery_status_charging_phase_C
-
-# Create a table for battery status with value and percentage
-battery_status_data = [
-    ["Full", f"{battery_status_full_phase_A} ({battery_status_full_phase_A / battery_status_phase_A_total * 100:.2f}%)", f"{battery_status_full_phase_B} ({battery_status_full_phase_B / battery_status_phase_B_total * 100:.2f}%)", f"{battery_status_full_phase_C} ({battery_status_full_phase_C / battery_status_phase_C_total * 100:.2f}%)"],
-    ["Empty", f"{battery_status_empty_phase_A} ({battery_status_empty_phase_A / battery_status_phase_A_total * 100:.2f}%)", f"{battery_status_empty_phase_B} ({battery_status_empty_phase_B / battery_status_phase_B_total * 100:.2f}%)", f"{battery_status_empty_phase_C} ({battery_status_empty_phase_C / battery_status_phase_C_total * 100:.2f}%)"],
-    ["Discharging", f"{battery_status_discharging_phase_A} ({battery_status_discharging_phase_A / battery_status_phase_A_total * 100:.2f}%)", f"{battery_status_discharging_phase_B} ({battery_status_discharging_phase_B / battery_status_phase_B_total * 100:.2f}%)", f"{battery_status_discharging_phase_C} ({battery_status_discharging_phase_C / battery_status_phase_C_total * 100:.2f}%)"],
-    ["Charging", f"{battery_status_charging_phase_A} ({battery_status_charging_phase_A / battery_status_phase_A_total * 100:.2f}%)", f"{battery_status_charging_phase_B} ({battery_status_charging_phase_B / battery_status_phase_B_total * 100:.2f}%)", f"{battery_status_charging_phase_C} ({battery_status_charging_phase_C / battery_status_phase_C_total * 100:.2f}%)"],
-    ["Total", battery_status_phase_A_total, battery_status_phase_B_total, battery_status_phase_C_total]
-]
-
-headers = ["Status", "Phase A", "Phase B", "Phase C"]
-
-print("")
-print("Battery Status:")
-print("This table illustrates the time the battery spends in each status.")
-print("A battery that is fully charged too often may indicate that it is oversized, whereas a battery that is frequently empty may suggest that it is undersized (unless PV-limited).")
-
-print("The distribution of charging and discharging can provide insights into whether the battery is used frequently or infrequently. If the discharging percentage exceeds the charging percentage, it indicates that the battery is frequently utilized to reduce grid consumption.")
-print(tabulate(battery_status_data, headers, tablefmt="grid"))
-
-# Statistics for charing power and discharging power when at the peak
-battery_charging_max_power_phase_A = results_df[results_df["charge_power_phase_A_W"] == max_charge_power_watts[0]].shape[0]
-battery_charging_max_power_phase_B = results_df[results_df["charge_power_phase_B_W"] == max_charge_power_watts[1]].shape[0]
-battery_charging_max_power_phase_C = results_df[results_df["charge_power_phase_C_W"] == max_charge_power_watts[2]].shape[0]
-battery_discharging_max_power_phase_A = results_df[results_df["discharge_power_phase_A_W"] == max_discharge_power_watts[0]].shape[0]
-battery_discharging_max_power_phase_B = results_df[results_df["discharge_power_phase_B_W"] == max_discharge_power_watts[1]].shape[0]
-battery_discharging_max_power_phase_C = results_df[results_df["discharge_power_phase_C_W"] == max_discharge_power_watts[2]].shape[0]
-battery_charging_not_max_power_phase_A = results_df[(results_df["charge_power_phase_A_W"] != max_charge_power_watts[0]) & (results_df["charge_power_phase_A_W"] != 0)].shape[0]
-battery_charging_not_max_power_phase_B = results_df[(results_df["charge_power_phase_B_W"] != max_charge_power_watts[1]) & (results_df["charge_power_phase_B_W"] != 0)].shape[0]
-battery_charging_not_max_power_phase_C = results_df[(results_df["charge_power_phase_C_W"] != max_charge_power_watts[2]) & (results_df["charge_power_phase_C_W"] != 0)].shape[0]
-battery_discharging_not_max_power_phase_A = results_df[(results_df["discharge_power_phase_A_W"] != max_discharge_power_watts[0]) & (results_df["discharge_power_phase_A_W"] != 0)].shape[0]
-battery_discharging_not_max_power_phase_B = results_df[(results_df["discharge_power_phase_B_W"] != max_discharge_power_watts[1]) & (results_df["discharge_power_phase_B_W"] != 0)].shape[0]
-battery_discharging_not_max_power_phase_C = results_df[(results_df["discharge_power_phase_C_W"] != max_discharge_power_watts[2]) & (results_df["discharge_power_phase_C_W"] != 0)].shape[0]
-
-def pct(part, total):
-    """Return formatted percentage string or n/a when denominator is zero."""
-    return f"{(part / total * 100):.2f}%" if total > 0 else "n/a"
-
-# Create a table for charging and discharging power at the peak
-charging_discharging_power_data = [
-    [
-        "Charging at Max Power",
-        pct(
-            battery_charging_max_power_phase_A,
-            battery_charging_max_power_phase_A + battery_charging_not_max_power_phase_A
-        ),
-        pct(
-            battery_charging_max_power_phase_B,
-            battery_charging_max_power_phase_B + battery_charging_not_max_power_phase_B
-        ),
-        pct(
-            battery_charging_max_power_phase_C,
-            battery_charging_max_power_phase_C + battery_charging_not_max_power_phase_C
-        ),
-    ],
-    [
-        "Charging Not at Max Power",
-        pct(
-            battery_charging_not_max_power_phase_A,
-            battery_charging_max_power_phase_A + battery_charging_not_max_power_phase_A
-        ),
-        pct(
-            battery_charging_not_max_power_phase_B,
-            battery_charging_max_power_phase_B + battery_charging_not_max_power_phase_B
-        ),
-        pct(
-            battery_charging_not_max_power_phase_C,
-            battery_charging_max_power_phase_C + battery_charging_not_max_power_phase_C
-        ),
-    ],
-    [
-        "Discharging at Max Power",
-        pct(
-            battery_discharging_max_power_phase_A,
-            battery_discharging_max_power_phase_A + battery_discharging_not_max_power_phase_A
-        ),
-        pct(
-            battery_discharging_max_power_phase_B,
-            battery_discharging_max_power_phase_B + battery_discharging_not_max_power_phase_B
-        ),
-        pct(
-            battery_discharging_max_power_phase_C,
-            battery_discharging_max_power_phase_C + battery_discharging_not_max_power_phase_C
-        ),
-    ],
-    [
-        "Discharging Not at Max Power",
-        pct(
-            battery_discharging_not_max_power_phase_A,
-            battery_discharging_max_power_phase_A + battery_discharging_not_max_power_phase_A
-        ),
-        pct(
-            battery_discharging_not_max_power_phase_B,
-            battery_discharging_max_power_phase_B + battery_discharging_not_max_power_phase_B
-        ),
-        pct(
-            battery_discharging_not_max_power_phase_C,
-            battery_discharging_max_power_phase_C + battery_discharging_not_max_power_phase_C
-        ),
-    ],
-]
-
-headers = ["Metric", "Phase A", "Phase B", "Phase C"]
-
-print("")
-print("Charging and Discharging Power at Peak:")
-print("The batteries are designed to charge and discharge at a specific maximum power level.")
-print("Frequent charging at maximum power may suggest the need for a more powerful system or an additional battery connected in parallel. The same consideration applies to discharging.")
-print(tabulate(charging_discharging_power_data, headers, tablefmt="grid"))
-
-print("")
 
 # ===============================
 # BUILD SIMULATION RANGES
