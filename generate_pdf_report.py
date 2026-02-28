@@ -487,16 +487,27 @@ def load_input_data_summary(simulation_paths: list[Path], configuration_count: i
     ends = []
     total_points = 0
     phase_count = None
+    missing_timestamp_fill_summary = None
+    points_per_scenario = []
 
     for path in sorted(simulation_paths):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        if missing_timestamp_fill_summary is None:
+            maybe_fill_summary = (
+                data.get("input_data_overview", {})
+                .get("missing_timestamp_fill")
+            )
+            if isinstance(maybe_fill_summary, dict):
+                missing_timestamp_fill_summary = maybe_fill_summary
 
         battery_cfg = data.get("configuration", {}).get("battery", {})
         cap = battery_cfg.get("capacity_Wh_per_phase")
         if isinstance(cap, list) and phase_count is None:
             phase_count = len(cap)
 
+        path_points = 0
         for month in data.get("months", []):
             r = month.get("range", {})
             start = r.get("start_date")
@@ -508,17 +519,110 @@ def load_input_data_summary(simulation_paths: list[Path], configuration_count: i
             if end:
                 ends.append(end)
             if isinstance(samples, (int, float)):
-                total_points += int(samples)
+                samples_i = int(samples)
+                total_points += samples_i
+                path_points += samples_i
+        points_per_scenario.append(path_points)
 
     if not starts or not ends:
         return None
 
+    unique_points_per_scenario = sorted(set(points_per_scenario))
+    same_points_across_scenarios = len(unique_points_per_scenario) == 1
+    date_from = min(starts)
+    date_to = max(ends)
+    date_range_days = None
+    try:
+        start_dt = datetime.fromisoformat(date_from)
+        end_dt = datetime.fromisoformat(date_to)
+        date_range_days = (end_dt - start_dt).total_seconds() / 86400.0
+    except ValueError:
+        date_range_days = None
+
+    average_raw_input_delta_minutes_per_phase = None
+    average_raw_input_delta_minutes_all_phases = None
+    average_raw_input_delta_minutes_by_phase: dict[str, float] = {}
+    real_points_before_fill_by_phase: dict[str, int] = {}
+    if isinstance(missing_timestamp_fill_summary, dict):
+        totals = missing_timestamp_fill_summary.get("totals", {})
+        per_phase_stats = (
+            missing_timestamp_fill_summary.get("per_phase", {})
+            if isinstance(missing_timestamp_fill_summary.get("per_phase", {}), dict)
+            else {}
+        )
+        real_points_all_phases = totals.get("real_points") if isinstance(totals, dict) else None
+        if (
+            isinstance(real_points_all_phases, (int, float))
+            and real_points_all_phases > 0
+            and isinstance(phase_count, int)
+            and phase_count > 0
+        ):
+            try:
+                start_dt = datetime.fromisoformat(date_from)
+                end_dt = datetime.fromisoformat(date_to)
+                span_minutes = (end_dt - start_dt).total_seconds() / 60.0
+                real_points_per_phase = float(real_points_all_phases) / float(phase_count)
+                if span_minutes > 0 and real_points_all_phases > 1:
+                    average_raw_input_delta_minutes_all_phases = (
+                        span_minutes / (float(real_points_all_phases) - 1.0)
+                    )
+                if span_minutes > 0 and real_points_per_phase > 1:
+                    average_raw_input_delta_minutes_per_phase = (
+                        span_minutes / (real_points_per_phase - 1)
+                    )
+            except ValueError:
+                average_raw_input_delta_minutes_per_phase = None
+                average_raw_input_delta_minutes_all_phases = None
+
+        for phase, stats in per_phase_stats.items():
+            if not isinstance(stats, dict):
+                continue
+            phase_real_points = stats.get("real_points")
+            if isinstance(phase_real_points, (int, float)):
+                real_points_before_fill_by_phase[str(phase)] = int(phase_real_points)
+            start_iso = stats.get("date_from")
+            end_iso = stats.get("date_to")
+            if (
+                isinstance(phase_real_points, (int, float))
+                and phase_real_points > 1
+                and isinstance(start_iso, str)
+                and isinstance(end_iso, str)
+            ):
+                try:
+                    start_dt = datetime.fromisoformat(start_iso)
+                    end_dt = datetime.fromisoformat(end_iso)
+                    phase_span_minutes = (end_dt - start_dt).total_seconds() / 60.0
+                    if phase_span_minutes > 0:
+                        average_raw_input_delta_minutes_by_phase[str(phase)] = (
+                            phase_span_minutes / (float(phase_real_points) - 1.0)
+                        )
+                except ValueError:
+                    pass
+
     return {
         "number_of_phases": phase_count if phase_count is not None else 3,
-        "date_from": min(starts),
-        "date_to": max(ends),
+        "date_from": date_from,
+        "date_to": date_to,
+        "date_range_days": date_range_days,
         "number_of_points": total_points,
+        "simulated_time_steps_all_scenarios": total_points,
+        "simulated_time_steps_per_scenario": (
+            unique_points_per_scenario[0] if same_points_across_scenarios else None
+        ),
+        "simulated_time_steps_per_scenario_range": (
+            {
+                "min": unique_points_per_scenario[0],
+                "max": unique_points_per_scenario[-1],
+            }
+            if not same_points_across_scenarios and unique_points_per_scenario
+            else None
+        ),
+        "average_raw_input_delta_minutes_per_phase": average_raw_input_delta_minutes_per_phase,
+        "average_raw_input_delta_minutes_all_phases": average_raw_input_delta_minutes_all_phases,
+        "average_raw_input_delta_minutes_by_phase": average_raw_input_delta_minutes_by_phase,
+        "real_points_before_fill_by_phase": real_points_before_fill_by_phase,
         "number_of_configurations": configuration_count,
+        "missing_timestamp_fill": missing_timestamp_fill_summary,
     }
 
 
@@ -1968,11 +2072,118 @@ def draw_input_data_page(
         color="#6b7280",
     )
 
+    def _fmt_count(value: object) -> str:
+        if isinstance(value, (int, float)):
+            return f"{int(value):,}".replace(",", "'")
+        return "-"
+
+    def _fmt_pct(value: object) -> str:
+        if isinstance(value, (int, float)):
+            return f"{int(value)}%"
+        return "-"
+
+    def _fmt_minutes(value: object) -> str:
+        if isinstance(value, (int, float)):
+            return f"{int(value)} min"
+        return "-"
+
+    def _fmt_days(value: object) -> str:
+        if isinstance(value, (int, float)):
+            return f"{float(value):.1f} days"
+        return "-"
+
+    fill_summary = summary.get("missing_timestamp_fill")
+    totals = {}
+    per_phase = {}
+    if isinstance(fill_summary, dict):
+        totals = fill_summary.get("totals", {}) if isinstance(fill_summary.get("totals", {}), dict) else {}
+        per_phase = fill_summary.get("per_phase", {}) if isinstance(fill_summary.get("per_phase", {}), dict) else {}
+
+    preferred_phase_order = ["A", "B", "C"]
+    phase_keys = [p for p in preferred_phase_order if p in per_phase]
+    phase_keys.extend(
+        p for p in sorted(per_phase.keys())
+        if p not in preferred_phase_order
+    )
+    phase_axis = "/".join(phase_keys) if phase_keys else "A/B/C"
+
+    real_points_before_fill_by_phase_value = "-"
+    avg_delta_per_phase_value = _fmt_minutes(summary.get("average_raw_input_delta_minutes_per_phase"))
+    real_points_by_phase = summary.get("real_points_before_fill_by_phase", {})
+    avg_delta_by_phase = summary.get("average_raw_input_delta_minutes_by_phase", {})
+    if isinstance(real_points_by_phase, dict) and phase_keys:
+        real_values = " / ".join(
+            _fmt_count(real_points_by_phase.get(phase))
+            for phase in phase_keys
+        )
+        real_points_before_fill_by_phase_value = f"{phase_axis}: {real_values}"
+    if isinstance(avg_delta_by_phase, dict) and phase_keys:
+        delta_values = " / ".join(
+            _fmt_minutes(avg_delta_by_phase.get(phase))
+            for phase in phase_keys
+        )
+        avg_delta_per_phase_value = f"{phase_axis}: {delta_values}"
+
+    filled_points_by_phase_value = "-"
+    filled_vs_real_by_phase_value = "-"
+    filled_points_interpolated_value = _fmt_count(totals.get("filled_points"))
+    if phase_keys:
+        filled_values = " / ".join(
+            _fmt_count((per_phase.get(phase, {}) or {}).get("filled_points"))
+            for phase in phase_keys
+        )
+        ratio_values = " / ".join(
+            _fmt_pct((per_phase.get(phase, {}) or {}).get("filled_vs_real_pct"))
+            for phase in phase_keys
+        )
+        filled_points_by_phase_value = f"{phase_axis}: {filled_values}"
+        filled_vs_real_by_phase_value = f"{phase_axis}: {ratio_values}"
+        filled_points_interpolated_value = filled_points_by_phase_value
+
+    # Requested order focused on input-data quality metrics.
+    rows = [
+        ("Date range (from)", str(summary.get("date_from", "-"))),
+        ("Date range (to)", str(summary.get("date_to", "-"))),
+        ("Date range span", _fmt_days(summary.get("date_range_days"))),
+        (
+            "Number of real minute points before fill (cleaned / grouped)",
+            real_points_before_fill_by_phase_value,
+        ),
+        (
+            "Average raw input delta",
+            avg_delta_per_phase_value,
+        ),
+        ("Filled points (interpolated)", filled_points_interpolated_value),
+        ("Filled vs real by phase", filled_vs_real_by_phase_value),
+    ]
+
+    label_wrap_width = 44
+    value_wrap_width = 34
+    line_height = 0.018
+    row_spacing = 0.010
+
+    wrapped_rows = []
+    for label, value in rows:
+        label_lines = textwrap.wrap(str(label), width=label_wrap_width) or [str(label)]
+        value_lines = textwrap.wrap(str(value), width=value_wrap_width) or [str(value)]
+        line_count = max(len(label_lines), len(value_lines))
+        row_step = line_count * line_height + row_spacing
+        wrapped_rows.append({
+            "label": "\n".join(label_lines),
+            "value": "\n".join(value_lines),
+            "row_step": row_step,
+        })
+
+    panel_top = 0.84
+    panel_height = max(0.26, 0.06 + sum(r["row_step"] for r in wrapped_rows))
+    panel_height = min(panel_height, 0.68)
+    panel_bottom = panel_top - panel_height
+
     ax.add_patch(
         plt.Rectangle(
-            (0.08, 0.58),
+            (0.08, panel_bottom),
             0.84,
-            0.26,
+            panel_height,
             linewidth=1.0,
             edgecolor="#d1d5db",
             facecolor="#f9fafb",
@@ -1980,19 +2191,62 @@ def draw_input_data_page(
         )
     )
 
-    rows = [
-        ("Number of phases", str(summary["number_of_phases"])),
-        ("Date range (from)", str(summary["date_from"])),
-        ("Date range (to)", str(summary["date_to"])),
-        ("Number of points", str(summary["number_of_points"])),
-        ("Number of configurations", str(summary["number_of_configurations"])),
-    ]
+    # Two-column row layout: left-aligned labels and values.
+    label_col_left = 0.11
+    value_col_left = 0.56
 
-    y = 0.80
-    for label, value in rows:
-        ax.text(0.11, y, label, ha="left", va="top", fontsize=11, color="#374151", fontweight="bold")
-        ax.text(0.52, y, value, ha="left", va="top", fontsize=11, color="#111827")
-        y -= 0.045
+    y = panel_top - 0.035
+    for row in wrapped_rows:
+        ax.text(
+            label_col_left,
+            y,
+            row["label"],
+            ha="left",
+            va="top",
+            fontsize=11,
+            color="#374151",
+            fontweight="bold",
+            linespacing=1.15,
+        )
+        ax.text(
+            value_col_left,
+            y,
+            row["value"],
+            ha="left",
+            va="top",
+            fontsize=11,
+            color="#111827",
+            linespacing=1.15,
+        )
+        y -= row["row_step"]
+
+    if isinstance(fill_summary, dict):
+        ax.text(
+            0.08,
+            max(0.07, panel_bottom - 0.03),
+            "Filled points represent missing minute timestamps reconstructed with linear interpolation.",
+            ha="left",
+            va="top",
+            fontsize=9.3,
+            color="#6b7280",
+            wrap=True,
+            transform=ax.transAxes,
+        )
+
+    ax.text(
+        0.08,
+        max(0.045, panel_bottom - 0.065),
+        (
+            "Real minute points are counted after cleaning invalid values and grouping "
+            "duplicate timestamps by minute."
+        ),
+        ha="left",
+        va="top",
+        fontsize=9.3,
+        color="#6b7280",
+        wrap=True,
+        transform=ax.transAxes,
+    )
 
     ax.text(0.06, 0.025, COPYRIGHT_SHORT, ha="left", va="bottom", fontsize=8.5, color="#9ca3af")
     ax.text(0.94, 0.025, "License: CC BY-NC 4.0", ha="right", va="bottom", fontsize=8.5, color="#9ca3af")

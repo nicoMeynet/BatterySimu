@@ -231,8 +231,105 @@ def compute_configuration_hash(configuration: dict) -> str:
     )
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
+def fill_missing_timestamps_with_linear_interpolation(df, value_column, phase_label):
+    """
+    Reindex one phase at 1-minute granularity, fill missing timestamps by linear interpolation,
+    and return both the filled dataframe and fill statistics.
+    """
+    real_points = int(len(df))
+    if real_points == 0:
+        return df, {
+            "phase": phase_label,
+            "date_from": None,
+            "date_to": None,
+            "real_points": 0,
+            "points_after_fill": 0,
+            "filled_points": 0,
+            "filled_vs_real_pct": 0.0,
+            "filled_vs_final_pct": 0.0,
+            "missing_before_interpolation": 0,
+            "missing_after_interpolation": 0,
+        }
+
+    date_from = df["timestamp"].min()
+    date_to = df["timestamp"].max()
+    full_timestamps = pd.date_range(start=date_from, end=date_to, freq="min")
+
+    points_after_fill = int(len(full_timestamps))
+    filled_points = int(max(points_after_fill - real_points, 0))
+
+    df_filled = (
+        df.set_index("timestamp")
+        .reindex(full_timestamps)
+        .rename_axis("timestamp")
+        .reset_index()
+    )
+
+    missing_before = int(df_filled[value_column].isna().sum())
+    df_filled[value_column] = df_filled[value_column].interpolate(method="linear")
+    missing_after = int(df_filled[value_column].isna().sum())
+
+    stats = {
+        "phase": phase_label,
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "real_points": real_points,
+        "points_after_fill": points_after_fill,
+        "filled_points": filled_points,
+        "filled_vs_real_pct": round_value(
+            (filled_points / real_points) * 100,
+            2
+        ) if real_points > 0 else 0.0,
+        "filled_vs_final_pct": round_value(
+            (filled_points / points_after_fill) * 100,
+            2
+        ) if points_after_fill > 0 else 0.0,
+        "missing_before_interpolation": missing_before,
+        "missing_after_interpolation": missing_after,
+    }
+
+    return df_filled, stats
+
+def build_missing_timestamp_fill_summary(phase_stats):
+    """Build aggregated missing-timestamp fill stats across all phases."""
+    total_real_points = sum(
+        int(stats.get("real_points", 0))
+        for stats in phase_stats.values()
+    )
+    total_points_after_fill = sum(
+        int(stats.get("points_after_fill", 0))
+        for stats in phase_stats.values()
+    )
+    total_filled_points = sum(
+        int(stats.get("filled_points", 0))
+        for stats in phase_stats.values()
+    )
+
+    return {
+        "method": "linear_interpolation",
+        "time_resolution": "1min",
+        "per_phase": phase_stats,
+        "totals": {
+            "real_points": total_real_points,
+            "points_after_fill": total_points_after_fill,
+            "filled_points": total_filled_points,
+            "filled_vs_real_pct": round_value(
+                (total_filled_points / total_real_points) * 100,
+                2
+            ) if total_real_points > 0 else 0.0,
+            "filled_vs_final_pct": round_value(
+                (total_filled_points / total_points_after_fill) * 100,
+                2
+            ) if total_points_after_fill > 0 else 0.0,
+        },
+    }
+
 #---- JSON Report Builder ----
-def build_json_report(simulation_ranges, seasonal_profitability=None):
+def build_json_report(
+    simulation_ranges,
+    seasonal_profitability=None,
+    input_data_overview=None
+):
     """Build final JSON payload from global/monthly ranges and seasonal summary."""
     configuration = build_configuration_section()
     configuration_hash = compute_configuration_hash(configuration)
@@ -248,11 +345,13 @@ def build_json_report(simulation_ranges, seasonal_profitability=None):
     ]
 
     return {
-        "schema_version": "1.5",
+        "schema_version": "1.6",
         "simulation_id": datetime.now(UTC).isoformat(),
 
         "configuration": configuration,
         "configuration_hash": configuration_hash,
+
+        "input_data_overview": input_data_overview,
 
         "global": global_range["results"],
 
@@ -1681,22 +1780,57 @@ print("+ Successfully grouped data by timestamp")
 
 # Fill missing timestamps in phase A with an average value between the values before and after the missing timestamp
 print("Filling missing timestamps with an average value between the values before and after the missing timestamp:")
-all_timestamps = pd.date_range(start=house_phase_a_start_timestamp, end=house_phase_a_end_timestamp, freq='min')
-house_phase_a = house_phase_a.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-house_phase_a["phase_a"] = house_phase_a["phase_a"].interpolate(method="linear")
-print("+ Successfully filled missing timestamps in phase A")
+phase_fill_stats = {}
+house_phase_a, phase_fill_stats["A"] = fill_missing_timestamps_with_linear_interpolation(
+    house_phase_a,
+    "phase_a",
+    "A",
+)
+print(
+    "+ Successfully filled missing timestamps in phase A "
+    f"(real={phase_fill_stats['A']['real_points']}, "
+    f"filled={phase_fill_stats['A']['filled_points']}, "
+    f"final={phase_fill_stats['A']['points_after_fill']}, "
+    f"filled_vs_real={int(phase_fill_stats['A']['filled_vs_real_pct'])}%)"
+)
 
 # Fill missing timestamps in phase B with an average value between the values before and after the missing timestamp
-all_timestamps = pd.date_range(start=house_phase_b_start_timestamp, end=house_phase_b_end_timestamp, freq='min')
-house_phase_b = house_phase_b.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-house_phase_b["phase_b"] = house_phase_b["phase_b"].interpolate(method='linear')
-print("+ Successfully filled missing timestamps in phase B")
+house_phase_b, phase_fill_stats["B"] = fill_missing_timestamps_with_linear_interpolation(
+    house_phase_b,
+    "phase_b",
+    "B",
+)
+print(
+    "+ Successfully filled missing timestamps in phase B "
+    f"(real={phase_fill_stats['B']['real_points']}, "
+    f"filled={phase_fill_stats['B']['filled_points']}, "
+    f"final={phase_fill_stats['B']['points_after_fill']}, "
+    f"filled_vs_real={int(phase_fill_stats['B']['filled_vs_real_pct'])}%)"
+)
 
 # Fill missing timestamps in phase C with an average value between the values before and after the missing timestamp
-all_timestamps = pd.date_range(start=house_phase_c_start_timestamp, end=house_phase_c_end_timestamp, freq='min')
-house_phase_c = house_phase_c.set_index("timestamp").reindex(all_timestamps).rename_axis("timestamp").reset_index()
-house_phase_c["phase_c"] = house_phase_c["phase_c"].interpolate(method='linear')
-print("+ Successfully filled missing timestamps in phase C")
+house_phase_c, phase_fill_stats["C"] = fill_missing_timestamps_with_linear_interpolation(
+    house_phase_c,
+    "phase_c",
+    "C",
+)
+print(
+    "+ Successfully filled missing timestamps in phase C "
+    f"(real={phase_fill_stats['C']['real_points']}, "
+    f"filled={phase_fill_stats['C']['filled_points']}, "
+    f"final={phase_fill_stats['C']['points_after_fill']}, "
+    f"filled_vs_real={int(phase_fill_stats['C']['filled_vs_real_pct'])}%)"
+)
+
+missing_timestamp_fill_summary = build_missing_timestamp_fill_summary(phase_fill_stats)
+fill_totals = missing_timestamp_fill_summary["totals"]
+print(
+    "+ Missing timestamp fill summary (A+B+C): "
+    f"real={fill_totals['real_points']}, "
+    f"filled={fill_totals['filled_points']}, "
+    f"final={fill_totals['points_after_fill']}, "
+    f"filled_vs_real={int(fill_totals['filled_vs_real_pct'])}%"
+)
 
 # Merge the 4 datasets based on the timestamp, filling missing values with 0
 print("Merging data into a single table")
@@ -1947,8 +2081,12 @@ print(f"+ CSV exported to {csv_output_file}")
 # ===============================
 print()
 print("Exporting JSON report...")
+input_data_overview = {
+    "missing_timestamp_fill": missing_timestamp_fill_summary
+}
 json_report = build_json_report(
     simulation_ranges=ranges,
-    seasonal_profitability=seasonal_profitability
+    seasonal_profitability=seasonal_profitability,
+    input_data_overview=input_data_overview
 )
 export_json_report(json_report, json_output_file)
