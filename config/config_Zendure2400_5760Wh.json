@@ -16,8 +16,8 @@
       2400,
       2400
     ],
-    "charge_efficiency": 0.9,
-    "discharge_efficiency": 0.9,
+    "charge_efficiency": 0.86,
+    "discharge_efficiency": 0.83,
     "max_cycles": 6000,
     "initial_soc_percent_per_phase": [
       100,
