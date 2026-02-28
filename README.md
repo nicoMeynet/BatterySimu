@@ -58,6 +58,7 @@ Main commands:
 - `make help`: show available commands and suggested workflow
 - `make venv`: create/update the virtual environment and install requirements
 - `make activate`: print the activation command
+- `make clean`: delete all generated content under `out/`
 - `make simulate_all`: run simulations for all battery configs in `config/config_*.json`
 - `make kpi_summary`: compute deterministic graph-KPI decision outputs (JSON + Markdown) from `out/simulation_json/*.json`
 - `make run_notebooks`: execute global/monthly/seasonal/KPI notebooks and export graphs
@@ -153,15 +154,15 @@ python battery_sim.py \
   dataset/2025/2025_history_phase_a_1dec2024-1dec2025.csv \
   dataset/2025/2025_history_phase_b_1dec2024-1dec2025.csv \
   dataset/2025/2025_history_phase_c_1dec2024-1dec2025.csv \
-  --config config/config_Zendure2400_5760kwh.json
+  --config config/config_Zendure2400_5760Wh.json
 
 # All scenarios from Makefile
 make simulate_all
 ```
 
 Example output files:
-- `out/simulation_csv/config_Zendure2400_5760kwh.csv`
-- `out/simulation_json/config_Zendure2400_5760kwh.json`
+- `out/simulation_csv/config_Zendure2400_5760Wh.csv`
+- `out/simulation_json/config_Zendure2400_5760Wh.json`
 
 ### b) KPI summary (deterministic graph-KPI decision matrix)
 
@@ -425,7 +426,7 @@ Global tariff file (`config/energy_tariff.json`) contains:
   - `off_peak.tariff_consume`
   - `off_peak.tariff_inject`
 
-Use `config/config_Zendure2400_2880kwh.json` as a template for new scenarios.
+Use `config/config_Zendure2400_2880Wh.json` as a template for new scenarios.
 
 KPI scoring file (`config/kpi_scoring.json`) contains graph-KPI thresholds only:
 - `thresholds.graph_kpis.global_energy_reduction_kwh.consumed_reduction_increment_pct_points_min`

@@ -74,6 +74,7 @@ help:
 	@echo "  all            Create venv and print activation command"
 	@echo "  venv           Create/update Python virtual environment and install requirements"
 	@echo "  activate       Print the command to activate the virtual environment"
+	@echo "  clean          Delete all generated data under out/"
 	@echo "  simulate_all   Run battery_sim.py for all config files in config/"
 	@echo "  kpi_summary    Compute deterministic KPI rankings from simulation JSON outputs"
 	@echo "  run_notebooks  Execute comparison notebooks and refresh exported graphs"
@@ -83,6 +84,7 @@ help:
 	@echo "Typical workflow:"
 	@echo "  make venv"
 	@echo "  source venv/bin/activate"
+	@echo "  make clean"
 	@echo "  make simulate_all"
 	@echo "  make kpi_summary"
 	@echo "  make recommend"
@@ -114,6 +116,13 @@ endif
 activate:
 	@echo "Run the following command to activate the virtual environment:"
 	@echo "source $(VENV_DIR)/bin/activate"
+
+.PHONY: clean
+clean:
+	@echo "Deleting all generated data under out/..."
+	@mkdir -p out
+	@find out -mindepth 1 -depth -delete
+	@echo "out/ directory cleaned."
 
 
 .PHONY: simulate_all
